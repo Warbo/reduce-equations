@@ -5,7 +5,7 @@ module Main where
 import qualified Data.ByteString as B
 import Data.ByteString.Lazy.Char8 (pack, unpack)
 import Data.List
-import Language.Eval
+import Language.Eval.Internal
 import System.Directory
 import System.IO.Unsafe
 import Test.QuickCheck
@@ -24,6 +24,8 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Variables added"             variablesAdded
   , testProperty "Sigs render"                 sigsRender
   , testProperty "Sigs have constants"         sigsHaveConsts
+  , testProperty "Sigs have variables"         sigsHaveVars
+  , testProperty "Can generate terms from sig" canGenerateFromSig
   --, testProperty "Reduce examples"             canReduceExamples
   ]
 
@@ -44,31 +46,78 @@ constantsAdded cs s = case withConsts cs s of
 variablesAdded vs s = case withVars vs s of
   Sig _ vs' -> all (`elem` vs') vs
 
-sigsRender = forAll (resize 2 arbitrary) sigsRender'
+sigsRender = testEval mkExpr (== Just "True")
+  where mkExpr s = let e = "show" $$ (f $$ render s)
+                       f = withQS "(const True :: Test.QuickSpec.Sig -> Bool)"
+                    in (e, ("f", f))
 
-sigsRender' s = once $ monadicIO $ do
-    result <- run $ eval ("show" $$ (f $$ render s))
-    assert (result == Just "True")
-  where f = withPkgs ["quickspec"] $ withMods ["Test.QuickSpec"] $
-            "(const True :: Test.QuickSpec.Sig -> Bool)"
+sigsHaveConsts = testEval mkExpr (== Just "True")
+  where mkExpr (s, cs) = let e            = "show" $$ (hasConsts $$ render s')
+                             s'           = withConsts cs s
+                             hasConsts    = withQS $ compose' checkConsts' constantSymbols'
+                             checkConsts' = checkNames' names
+                             names        = map constName cs
+                             dbg          = ("names",  names)
+                          in (e, dbg)
 
-sigsHaveConsts = forAll (resize 2 arbitrary)
-                        (\(s, cs) -> sigsHaveConsts' s cs)
+sigsHaveVars = testEval mkExpr (== Just "True")
+  where mkExpr (s, vs) = let e          = "show" $$ (hasVars $$ render s')
+                             s'         = withVars vs s
+                             hasVars    = withQS $ compose' checkVars' variableSymbols'
+                             checkVars' = checkNames' names
+                             names      = map varName vs
+                             dbg        = ("names", names)
+                          in (e, dbg)
 
-sigsHaveConsts' s cs = once $ monadicIO $ do
-    result <- run $ eval ("show" $$ (hasConsts $$ render s'))
-    assert (result == Just "True")
-  where s' = withConsts cs s
-        hasConsts   = withMods ["Test.QuickSpec.Term", "Test.QuickSpec.Signature"] $
-                      withDefs $ "(checkConsts . Test.QuickSpec.Signature.constantSymbols)"
-        withDefs    = withPreamble checkConsts . withPreamble isIn
-        checkConsts = "checkConsts syms = all (isIn syms) [" ++
-                        intercalate "," (map (show . (\(Name n) -> n) . constName) cs) ++ "]"
-        isIn        = "isIn syms n = any ((== n) . Test.QuickSpec.Term.name) syms"
+canGenerateFromSig = testEval' evl mkExpr expect
+  where mkExpr s = let e     = ("(>>)" $$ doGen) $$ true
+                       doGen = doGenerate' $$ render s
+                       true  = "putStr" $$ asString "True"
+                    in (e, ())
+        evl      = eval' (\e -> "main = " ++ e)
+        expect x = case x of
+          Nothing -> False
+          Just y  -> last (lines y) == "True"
 
 --canReduceExamples = length (reduce exampleEqs) < length exampleEqs
 
 -- Helpers
+
+testEval :: (Arbitrary a, Show a, Show b) => (a -> (Expr, b))
+                                          -> (Maybe String -> Bool)
+                                          -> Property
+testEval = testEval' eval
+
+testEval' :: (Arbitrary a, Show a, Show b) => (Expr -> IO (Maybe String))
+                                           -> (a -> (Expr, b))
+                                           -> (Maybe String -> Bool)
+                                           -> Property
+testEval' evl mkExpr expect = forAll (resize 10 arbitrary) go
+  where go arg = once $ monadicIO $ do
+                   let (e, dbg) = mkExpr arg
+                   result <- run (evl e)
+                   monitor . counterexample . show $ (("expr",   e),
+                                                      ("result", result),
+                                                      ("debug",  dbg))
+                   assert (expect result)
+
+constantSymbols' = withQS $ qualified "Test.QuickSpec.Signature"
+                                      "constantSymbols"
+
+variableSymbols' = withQS $ qualified "Test.QuickSpec.Signature"
+                                      "variableSymbols"
+
+isIn' = withQS $ lambda ["syms", "n"] body
+  where body = ("any" $$ f) $$ "syms"
+        f    = compose' "(== n)" name'
+
+name' = withQS $ qualified "Test.QuickSpec.Term" "name"
+
+checkNames' :: [Name] -> Expr
+checkNames' ns = lambda ["syms"] body
+  where body       = ("all" $$ (isIn' $$ "syms")) $$ names
+        names      = raw $ "[" ++ commaNames ++ "]"
+        commaNames = intercalate "," (map (show . (\(Name n) -> n)) ns)
 
 exampleEqs :: [[Object]]
 exampleEqs = map parse exampleJson
@@ -93,7 +142,11 @@ exampleFiles = do
 withExamples f = forAll (elements exampleEqs) f
 
 instance Arbitrary Var where
-  arbitrary = return Var
+  arbitrary = sized $ \n -> do
+    arity <- elements [0, 1, 2]
+    typ   <- naryType arity n
+    index <- elements [0, 1, 2]
+    return $ Var (Type typ) index (Arity arity)
 
 instance Arbitrary Const where
   arbitrary = sized $ \n -> do
@@ -112,10 +165,6 @@ sizedType :: Int -> Gen String
 sizedType 0 = elements ["Int", "Bool", "Float"]
 sizedType n = oneof [
     sizedType 0,
-    do n' <- choose (0, n - 1)
-       l  <- sizedType n'
-       r  <- sizedType (n - n')
-       return $ "(" ++ l ++ ") -> (" ++ r ++ ")",
     do x <- sizedType (n - 1)
        return $ "[" ++ x ++ "]",
     do n' <- choose (0, n - 1)
