@@ -48,7 +48,8 @@ sigFromEqs []     = emptySig
 sigFromEqs (e:es) = sigFromEq e `mappend` sigFromEqs es
 
 sigFromEq :: Equation -> Sig
-sigFromEq e = withVars (eqVars e) emptySig
+sigFromEq e = withVars   (eqVars   e) .
+              withConsts (eqConsts e) $ emptySig
 
 -- Accessors
 

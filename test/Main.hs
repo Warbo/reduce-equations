@@ -140,11 +140,25 @@ canGetRepsFromSig = testExec mkExpr endsInTrue
 canGetSigFromEqs eqs = case sigFromEqs eqs of
   !(Sig _ _) -> True
 
-eqSigHasVars eqs = setEq (sigVars sig) (concatMap eqVars eqs)
-  where sig = sigFromEqs eqs
+eqSigHasVars eqs = counterexample debug test
+  where sig     = sigFromEqs eqs
+        sigvars = sigVars sig
+        eqvars  = concatMap eqVars eqs
+        test    = setEq sigvars eqvars
+        debug   = show (("eqs", eqs),
+                        ("sigvars", sigvars),
+                        ("eqvars",  eqvars),
+                        ("sig",     sig))
 
-eqSigHasConsts eqs = setEq (sigConsts sig) (concatMap eqConsts eqs)
-  where sig = sigFromEqs eqs
+eqSigHasConsts eqs = counterexample debug test
+  where sig       = sigFromEqs eqs
+        test      = setEq sigconsts eqconsts
+        sigconsts = sigConsts sig
+        eqconsts  = concatMap eqConsts eqs
+        debug     = show (("eqs",       eqs),
+                          ("sig",       sig),
+                          ("sigconsts", sigconsts),
+                          ("eqconsts",  eqconsts))
 
 --canReduceExamples = length (reduce exampleEqs) < length exampleEqs
 
