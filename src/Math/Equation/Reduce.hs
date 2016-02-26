@@ -1,21 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Math.Equation.Reduce (
-    module Test.QuickSpec.Equation
-  , module Data.Aeson
-  --, reduce
-  ) where
-
-import Control.Monad
-import Control.Monad.Trans.State.Strict as S
-import Data.Functor.Identity
-import Control.Monad.Reader
-import Data.Aeson
-import Data.List
-import Test.QuickSpec.Equation
-import Test.QuickSpec.Main hiding (universe)
-import Test.QuickSpec.Reasoning.NaiveEquationalReasoning hiding (rep, get, put)
-import Test.QuickSpec.Term
+module Math.Equation.Reduce where
 
 {-
 instance FromJSON Equation where

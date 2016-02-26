@@ -19,6 +19,8 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Math.Equation.Reduce
                      , Math.Equation.Internal
+                     , Math.Equation.Internal.Eval
+                     , Math.Equation.Internal.Types
   -- other-modules:       
   -- other-extensions:    
   build-depends:       base >=4.8 && <4.9

@@ -2,6 +2,7 @@
 
 module Main where
 
+import Data.Aeson
 import qualified Data.ByteString as B
 import Data.ByteString.Lazy.Char8 (pack, unpack)
 import Data.List
@@ -27,11 +28,16 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Sigs render"                 sigsRender
   , testProperty "Sigs have constants"         sigsHaveConsts
   , testProperty "Sigs have variables"         sigsHaveVars
+  , testProperty "Constants are distinct"      sigConstsUniqueIndices
+  , testProperty "Variables are distinct"      sigVarsUniqueIndices
   , testProperty "Can generate terms from sig" canGenerateFromSig
   , testProperty "Can get classes from sig"    canGetClassesFromSig
   , testProperty "Can get universe from sig"   canGetUnivFromSig
   , testProperty "Can get context from sig"    canGetCxtFromSig
   , testProperty "Can get reps from sig"       canGetRepsFromSig
+  , testProperty "Can get sig from equations"  canGetSigFromEqs
+  , testProperty "Sig has equation variables"  eqSigHasVars
+  , testProperty "Sig has equation constants"  eqSigHasConsts
   --, testProperty "Can get prune equations"     canPruneEquations
   ]
 
@@ -79,55 +85,103 @@ sigsHaveVars = testEval mkExpr (== Just "True")
                              dbg        = ("names", names)
                           in (e, dbg)
 
-canGenerateFromSig = testEval' mkExpr endsInTrue
+sigConstsUniqueIndices = once sigConstsUniqueIndices'
+
+-- Use `c` to generate a bunch of similar constants `consts`, add them to `s` to
+-- get `sig`. Render `sig` to a QuickSpec signature, then print out its constant
+-- symbols and compare with those of `sig`.
+sigConstsUniqueIndices' s (Const a (Name n) t) = testEval mkExpr hasConsts
+  where mkExpr () = let syms  = constantSymbols' $$$ render sig
+                        names = (map' $$$ name') $$$ syms
+                        e     = unlines' $$$ names
+                     in (e, ("consts", consts))
+        hasConsts Nothing    = error "Failed to evaluate"
+        hasConsts (Just out) = setEq (map Name (lines out))
+                                     (map constName (sigConsts sig))
+        consts = [Const a (Name (n ++ show i)) t | i <- [0..10]]
+        sig    = withConsts consts s
+
+sigVarsUniqueIndices = once sigVarsUniqueIndices'
+
+-- Use `v` to generate a bunch of `Var`s of the same type, `vars`, add them to
+-- `s` to get `sig`. Render `sig` to a QuickSpec signature, then print out its
+-- variable symbols and compare with those of `sig`.
+sigVarsUniqueIndices' s (Var t _ a) = testEval mkExpr hasVars
+  where mkExpr () = let syms  = variableSymbols' $$$ render sig
+                        names = (map' $$$ name') $$$ syms
+                        e     = unlines' $$$ names
+                     in (e, ("vars", vars))
+        hasVars Nothing    = error "Failed to evaluate"
+        hasVars (Just out) = setEq (map Name (lines out))
+                                   (map varName (sigVars sig))
+        vars = [Var t i a | i <- [0..10]]
+        sig  = withVars vars s
+
+canGenerateFromSig = testExec mkExpr endsInTrue
   where mkExpr s = let e = ((>>$) $$$ doGenerate' s) $$$ putTrue
                     in (e, ())
 
-canGetClassesFromSig = testEval' mkExpr endsInTrue
+canGetClassesFromSig = testExec mkExpr endsInTrue
   where mkExpr s = let e = ((>>$) $$$ doClasses' s) $$$ putTrue
                     in (e, ())
 
-canGetUnivFromSig = testEval' mkExpr endsInTrue
+canGetUnivFromSig = testExec mkExpr endsInTrue
   where mkExpr s = let e = ((>>$) $$$ doUniv' s) $$$ putTrue
                     in (e, ())
 
-canGetCxtFromSig = testEval' mkExpr endsInTrue
+canGetCxtFromSig = testExec mkExpr endsInTrue
   where mkExpr s = let e = ((>>$) $$$ doCtx' s) $$$ putTrue
                     in (e, ())
 
-canGetRepsFromSig = testEval' mkExpr endsInTrue
+canGetRepsFromSig = testExec mkExpr endsInTrue
   where mkExpr s = let e = ((>>$) $$$ doReps' s) $$$ putTrue
                     in (e, ())
+
+canGetSigFromEqs eqs = case sigFromEqs eqs of
+  !(Sig _ _) -> True
+
+eqSigHasVars eqs = setEq (sigVars sig) (concatMap eqVars eqs)
+  where sig = sigFromEqs eqs
+
+eqSigHasConsts eqs = setEq (sigConsts sig) (concatMap eqConsts eqs)
+  where sig = sigFromEqs eqs
 
 --canReduceExamples = length (reduce exampleEqs) < length exampleEqs
 
 -- Helpers
 
+setEq xs ys = all (`elem` xs) ys && all (`elem` ys) xs
+
 endsInTrue x = case x of
   Nothing -> False
   Just y  -> last (lines y) == "True"
 
-(>>$) :: TypedExpr (IO a -> IO b -> IO b)
-(>>$) = "(>>)"
-
 putTrue :: TypedExpr (IO ())
 putTrue  = TE $ "putStr" $$ asString "True"
 
+-- | Check that the generated `String` expressions satisfy the given predicate.
+--   The type `b` is for any extra debug output to include in case of failure.
 testEval :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr String, b))
                                           -> (Maybe String -> Bool)
                                           -> Property
-testEval = testEval'' (\(TE e) -> eval e)
+testEval = testEval' (\(TE e) -> eval e)
 
-testEval' :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr (IO e), b))
+-- | Check that the output of the generated `IO` actions satifies the given
+--   predicate. `b` is for extra debug output to include in case of failure.
+testExec :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr (IO e), b))
                                            -> (Maybe String -> Bool)
                                            -> Property
-testEval' = testEval'' evalAsMain
+testExec = testEval' exec
 
-testEval'' :: (Arbitrary a, Show a, Show b) => (TypedExpr e -> IO (Maybe String))
+-- | Takes an expression-evaluating function, an expression-generating function
+--   (`b` is any debug output we should include in case of failure), an
+--   output-checking function and tests whether the output of evaluating the
+--   generated expressions passes the checker.
+testEval' :: (Arbitrary a, Show a, Show b) => (TypedExpr e -> IO (Maybe String))
                                             -> (a -> (TypedExpr e, b))
                                             -> (Maybe String -> Bool)
                                             -> Property
-testEval'' evl mkExpr expect = forAll (resize 10 arbitrary) go
+testEval' evl mkExpr expect = forAll (resize 10 arbitrary) go
   where go arg = once $ monadicIO $ do
                    let (e, dbg) = mkExpr arg
                    result <- run (evl e)
@@ -144,37 +198,9 @@ variableSymbols' :: TypedExpr (QSSig -> [Test.QuickSpec.Term.Symbol])
 variableSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
                                            "variableSymbols"
 
-isIn' :: TypedExpr ([Test.QuickSpec.Term.Symbol] -> String -> Bool)
-isIn' = tlam "syms" (tlam "n" body)
-  where body = (any' $$$ f) $$$ syms
-        f    = compose' (eq $$$ n) name'
-        syms :: TypedExpr [Test.QuickSpec.Term.Symbol]
-        syms = "syms"
-        eq :: Eq a => TypedExpr (a -> a -> Bool)
-        eq = "(==)"
-        n :: TypedExpr String
-        n = "n"
+-- Data generators
 
-any' :: TypedExpr ((a -> Bool) -> [a] -> Bool)
-any' = "any"
-
-name' :: TypedExpr (Test.QuickSpec.Term.Symbol -> String)
-name' = TE . withQS $ qualified "Test.QuickSpec.Term" "name"
-
-show' :: Show a => TypedExpr (a -> String)
-show' = "show"
-
-checkNames' :: [Name] -> TypedExpr ([Test.QuickSpec.Term.Symbol] -> Bool)
-checkNames' ns = tlam "syms" body
-  where body       = (all' $$$ (isIn' $$$ syms)) $$$ names
-        names :: TypedExpr [String]
-        names      = TE . raw $ "[" ++ commaNames ++ "]"
-        commaNames = intercalate "," (map (show . (\(Name n) -> n)) ns)
-        syms :: TypedExpr [Test.QuickSpec.Term.Symbol]
-        syms = "syms"
-
-all' :: TypedExpr ((a -> Bool) -> [a] -> Bool)
-all' = "all"
+-- Example input from files
 
 exampleEqs :: [[Object]]
 exampleEqs = map parse exampleJson
@@ -197,6 +223,16 @@ exampleFiles = do
         isJson x = reverse ".json" == take 5 (reverse x)
 
 withExamples f = forAll (elements exampleEqs) f
+
+-- Random input generators
+
+instance Arbitrary Equation where
+  arbitrary = Eq <$> arbitrary <*> arbitrary
+
+instance Arbitrary Term where
+  arbitrary = oneof [App <$> arbitrary <*> arbitrary,
+                     C <$> arbitrary,
+                     V <$> arbitrary]
 
 instance Arbitrary Var where
   arbitrary = sized $ \n -> do
