@@ -13,6 +13,8 @@ import Test.QuickCheck.Monadic
 import Test.Tasty            (defaultMain, testGroup, localOption)
 import Test.Tasty.QuickCheck
 
+import qualified Test.QuickSpec.Term
+
 import Math.Equation.Reduce
 import Math.Equation.Internal
 
@@ -26,7 +28,11 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Sigs have constants"         sigsHaveConsts
   , testProperty "Sigs have variables"         sigsHaveVars
   , testProperty "Can generate terms from sig" canGenerateFromSig
-  --, testProperty "Reduce examples"             canReduceExamples
+  , testProperty "Can get classes from sig"    canGetClassesFromSig
+  , testProperty "Can get universe from sig"   canGetUnivFromSig
+  , testProperty "Can get context from sig"    canGetCxtFromSig
+  , testProperty "Can get reps from sig"       canGetRepsFromSig
+  --, testProperty "Can get prune equations"     canPruneEquations
   ]
 
 -- Tests
@@ -47,52 +53,81 @@ variablesAdded vs s = case withVars vs s of
   Sig _ vs' -> all (`elem` vs') vs
 
 sigsRender = testEval mkExpr (== Just "True")
-  where mkExpr s = let e = "show" $$ (f $$ render s)
-                       f = withQS "(const True :: Test.QuickSpec.Sig -> Bool)"
+  where mkExpr s = let e = show' $$$ (f $$$ render s)
+                       f :: TypedExpr (QSSig -> Bool)
+                       f = TE $ withQS "(const True :: Test.QuickSpec.Sig -> Bool)"
                     in (e, ("f", f))
 
 sigsHaveConsts = testEval mkExpr (== Just "True")
-  where mkExpr (s, cs) = let e            = "show" $$ (hasConsts $$ render s')
+  where mkExpr (s, cs) = let e            = show' $$$ (hasConsts $$$ render s')
                              s'           = withConsts cs s
-                             hasConsts    = withQS $ compose' checkConsts' constantSymbols'
+                             hasConsts :: TypedExpr (QSSig -> Bool)
+                             hasConsts    = compose' checkConsts' constantSymbols'
+                             checkConsts' :: TypedExpr ([Test.QuickSpec.Term.Symbol] -> Bool)
                              checkConsts' = checkNames' names
                              names        = map constName cs
                              dbg          = ("names",  names)
                           in (e, dbg)
 
 sigsHaveVars = testEval mkExpr (== Just "True")
-  where mkExpr (s, vs) = let e          = "show" $$ (hasVars $$ render s')
+  where mkExpr (s, vs) = let e          = show' $$$ (hasVars $$$ render s')
                              s'         = withVars vs s
-                             hasVars    = withQS $ compose' checkVars' variableSymbols'
+                             hasVars :: TypedExpr (QSSig -> Bool)
+                             hasVars    = compose' checkVars' variableSymbols'
                              checkVars' = checkNames' names
                              names      = map varName vs
                              dbg        = ("names", names)
                           in (e, dbg)
 
-canGenerateFromSig = testEval' evl mkExpr expect
-  where mkExpr s = let e     = ("(>>)" $$ doGen) $$ true
-                       doGen = doGenerate' $$ render s
-                       true  = "putStr" $$ asString "True"
+canGenerateFromSig = testEval' mkExpr endsInTrue
+  where mkExpr s = let e = ((>>$) $$$ doGenerate' s) $$$ putTrue
                     in (e, ())
-        evl      = eval' (\e -> "main = " ++ e)
-        expect x = case x of
-          Nothing -> False
-          Just y  -> last (lines y) == "True"
+
+canGetClassesFromSig = testEval' mkExpr endsInTrue
+  where mkExpr s = let e = ((>>$) $$$ doClasses' s) $$$ putTrue
+                    in (e, ())
+
+canGetUnivFromSig = testEval' mkExpr endsInTrue
+  where mkExpr s = let e = ((>>$) $$$ doUniv' s) $$$ putTrue
+                    in (e, ())
+
+canGetCxtFromSig = testEval' mkExpr endsInTrue
+  where mkExpr s = let e = ((>>$) $$$ doCtx' s) $$$ putTrue
+                    in (e, ())
+
+canGetRepsFromSig = testEval' mkExpr endsInTrue
+  where mkExpr s = let e = ((>>$) $$$ doReps' s) $$$ putTrue
+                    in (e, ())
 
 --canReduceExamples = length (reduce exampleEqs) < length exampleEqs
 
 -- Helpers
 
-testEval :: (Arbitrary a, Show a, Show b) => (a -> (Expr, b))
+endsInTrue x = case x of
+  Nothing -> False
+  Just y  -> last (lines y) == "True"
+
+(>>$) :: TypedExpr (IO a -> IO b -> IO b)
+(>>$) = "(>>)"
+
+putTrue :: TypedExpr (IO ())
+putTrue  = TE $ "putStr" $$ asString "True"
+
+testEval :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr String, b))
                                           -> (Maybe String -> Bool)
                                           -> Property
-testEval = testEval' eval
+testEval = testEval'' (\(TE e) -> eval e)
 
-testEval' :: (Arbitrary a, Show a, Show b) => (Expr -> IO (Maybe String))
-                                           -> (a -> (Expr, b))
+testEval' :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr (IO e), b))
                                            -> (Maybe String -> Bool)
                                            -> Property
-testEval' evl mkExpr expect = forAll (resize 10 arbitrary) go
+testEval' = testEval'' evalAsMain
+
+testEval'' :: (Arbitrary a, Show a, Show b) => (TypedExpr e -> IO (Maybe String))
+                                            -> (a -> (TypedExpr e, b))
+                                            -> (Maybe String -> Bool)
+                                            -> Property
+testEval'' evl mkExpr expect = forAll (resize 10 arbitrary) go
   where go arg = once $ monadicIO $ do
                    let (e, dbg) = mkExpr arg
                    result <- run (evl e)
@@ -101,23 +136,45 @@ testEval' evl mkExpr expect = forAll (resize 10 arbitrary) go
                                                       ("debug",  dbg))
                    assert (expect result)
 
-constantSymbols' = withQS $ qualified "Test.QuickSpec.Signature"
-                                      "constantSymbols"
+constantSymbols' :: TypedExpr (QSSig -> [Test.QuickSpec.Term.Symbol])
+constantSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
+                                           "constantSymbols"
 
-variableSymbols' = withQS $ qualified "Test.QuickSpec.Signature"
-                                      "variableSymbols"
+variableSymbols' :: TypedExpr (QSSig -> [Test.QuickSpec.Term.Symbol])
+variableSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
+                                           "variableSymbols"
 
-isIn' = withQS $ lambda ["syms", "n"] body
-  where body = ("any" $$ f) $$ "syms"
-        f    = compose' "(== n)" name'
+isIn' :: TypedExpr ([Test.QuickSpec.Term.Symbol] -> String -> Bool)
+isIn' = tlam "syms" (tlam "n" body)
+  where body = (any' $$$ f) $$$ syms
+        f    = compose' (eq $$$ n) name'
+        syms :: TypedExpr [Test.QuickSpec.Term.Symbol]
+        syms = "syms"
+        eq :: Eq a => TypedExpr (a -> a -> Bool)
+        eq = "(==)"
+        n :: TypedExpr String
+        n = "n"
 
-name' = withQS $ qualified "Test.QuickSpec.Term" "name"
+any' :: TypedExpr ((a -> Bool) -> [a] -> Bool)
+any' = "any"
 
-checkNames' :: [Name] -> Expr
-checkNames' ns = lambda ["syms"] body
-  where body       = ("all" $$ (isIn' $$ "syms")) $$ names
-        names      = raw $ "[" ++ commaNames ++ "]"
+name' :: TypedExpr (Test.QuickSpec.Term.Symbol -> String)
+name' = TE . withQS $ qualified "Test.QuickSpec.Term" "name"
+
+show' :: Show a => TypedExpr (a -> String)
+show' = "show"
+
+checkNames' :: [Name] -> TypedExpr ([Test.QuickSpec.Term.Symbol] -> Bool)
+checkNames' ns = tlam "syms" body
+  where body       = (all' $$$ (isIn' $$$ syms)) $$$ names
+        names :: TypedExpr [String]
+        names      = TE . raw $ "[" ++ commaNames ++ "]"
         commaNames = intercalate "," (map (show . (\(Name n) -> n)) ns)
+        syms :: TypedExpr [Test.QuickSpec.Term.Symbol]
+        syms = "syms"
+
+all' :: TypedExpr ((a -> Bool) -> [a] -> Bool)
+all' = "all"
 
 exampleEqs :: [[Object]]
 exampleEqs = map parse exampleJson
