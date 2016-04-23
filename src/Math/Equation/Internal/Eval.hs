@@ -27,6 +27,7 @@ import qualified Test.QuickSpec.TestTree
 import qualified Test.QuickSpec.Utils.Typed
 import qualified Test.QuickSpec.Utils.TypeMap
 import qualified Test.QuickSpec.Reasoning.NaiveEquationalReasoning
+import qualified Test.QuickSpec.Equation
 
 -- We use nix-eval to perform the evaluation. Since the code is quite tricky, we
 -- wrap nix-eval's `Expr` values as `TypedExpr`s which have a phantom type
@@ -60,6 +61,25 @@ exec :: TypedExpr (IO a) -> IO (Maybe String)
 exec (TE x) = eval' ("main = " ++) x
 
 -- Conversion from our representations to QuickSpec expressions
+
+renderEqs :: [Equation] -> TypedExpr [Test.QuickSpec.Equation.Equation]
+renderEqs []     = nil'
+renderEqs (e:es) = (cons' $$$ renderEq e) $$$ renderEqs es
+
+renderEq :: Equation -> TypedExpr Test.QuickSpec.Equation.Equation
+renderEq (Eq lhs rhs) = ("(:=:)" $$$ renderTerm lhs) $$$ renderTerm rhs
+
+renderTerm :: Term -> TypedExpr Test.QuickSpec.Term.Term
+renderTerm t = case t of
+    App lhs rhs -> (app  $$$ renderTerm lhs) $$$ renderTerm rhs
+    C   c       -> const $$$ (sigToSym $$$ renderConst c)
+    V   v       -> var   $$$ (sigToSym $$$ renderVar   v)
+  where app :: TypedExpr (Test.QuickSpec.Term.Term -> Test.QuickSpec.Term.Term -> Test.QuickSpec.Term.Term)
+        app   = qsQual "Test.QuickSpec.Term" "App"
+        const, var :: TypedExpr (Test.QuickSpec.Term.Symbol -> Test.QuickSpec.Term.Term)
+        const = qsQual "Test.QuickSpec.Term" "Const"
+        var   = qsQual "Test.QuickSpec.Term" "Var"
+        sigToSym = compose' head' symbols'
 
 render :: Sig -> TypedExpr QSSig
 render (Sig cs vs) = mappend' (renderConsts cs) (renderVars vs)
@@ -254,6 +274,9 @@ erase' :: TypedExpr (Test.QuickSpec.Utils.Typed.Tagged a -> a)
 erase' = qsQual "Test.QuickSpec.Utils.Typed" "erase"
 
 prune' = qsQual "Test.QuickSpec.Main" "prune"
+
+showEquation' :: TypedExpr (Test.QuickSpec.Signature.Sig -> Test.QuickSpec.Equation.Equation -> String)
+showEquation' = qsQual "Test.QuickSpec.Equation" "showEquation"
 
 -- Prefix constructor names with `con`
 

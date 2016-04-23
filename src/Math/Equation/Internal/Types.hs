@@ -44,8 +44,7 @@ withVars :: [Var] -> Sig -> Sig
 withVars vs (Sig cs' vs') = Sig cs' (vs ++ vs')
 
 sigFromEqs :: [Equation] -> Sig
-sigFromEqs []     = emptySig
-sigFromEqs (e:es) = sigFromEq e `mappend` sigFromEqs es
+sigFromEqs = foldr (mappend . sigFromEq) emptySig
 
 sigFromEq :: Equation -> Sig
 sigFromEq e = withVars   (eqVars   e) .

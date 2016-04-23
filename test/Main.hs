@@ -6,6 +6,7 @@ import Data.Aeson
 import qualified Data.ByteString as B
 import Data.ByteString.Lazy.Char8 (pack, unpack)
 import Data.List
+import Data.Maybe
 import Language.Eval.Internal
 import System.Directory
 import System.IO.Unsafe
@@ -38,6 +39,7 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Can get sig from equations"  canGetSigFromEqs
   , testProperty "Sig has equation variables"  eqSigHasVars
   , testProperty "Sig has equation constants"  eqSigHasConsts
+  , testProperty "Can render equations"        canRenderEqs
   --, testProperty "Can get prune equations"     canPruneEquations
   ]
 
@@ -138,7 +140,7 @@ canGetRepsFromSig = testExec mkExpr endsInTrue
                     in (e, ())
 
 canGetSigFromEqs eqs = case sigFromEqs eqs of
-  !(Sig _ _) -> True
+  Sig _ _ -> True
 
 eqSigHasVars eqs = counterexample debug test
   where sig     = sigFromEqs eqs
@@ -160,7 +162,18 @@ eqSigHasConsts eqs = counterexample debug test
                           ("sigconsts", sigconsts),
                           ("eqconsts",  eqconsts))
 
---canReduceExamples = length (reduce exampleEqs) < length exampleEqs
+canRenderEqs = once . forAll (resize 100 arbitrary) $ canRenderEqs'
+
+canRenderEqs' eqs = testEval mkExpr haveEqs
+  where mkExpr () = (unlines' $$$ shownEqs', debug)
+        sig'      = render (sigFromEqs eqs)
+        shownEqs' = (map' $$$ (showEquation' $$$ sig')) $$$ eqs'
+        eqs'      = renderEqs eqs
+        debug     = (("eqs",  eqs),
+                     ("sig'", sig'),
+                     ("eqs'", eqs'))
+        haveEqs Nothing  = error "Failed to eval"
+        haveEqs (Just s) = setEq (lines s) (map show eqs)
 
 -- Helpers
 
@@ -218,9 +231,7 @@ variableSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
 
 exampleEqs :: [[Object]]
 exampleEqs = map parse exampleJson
-  where parse x = case decode (pack x) of
-          Nothing -> error ("Failed to parse JSON: " ++ x)
-          Just  e -> e
+  where parse x = fromMaybe (error ("Failed to parse JSON: " ++ x)) (decode (pack x))
 
 exampleJson :: [String]
 {-# NOINLINE exampleJson #-}
@@ -236,7 +247,7 @@ exampleFiles = do
         isJson :: String -> Bool
         isJson x = reverse ".json" == take 5 (reverse x)
 
-withExamples f = forAll (elements exampleEqs) f
+withExamples = forAll (elements exampleEqs)
 
 -- Random input generators
 
@@ -258,7 +269,7 @@ instance Arbitrary Var where
 instance Arbitrary Const where
   arbitrary = sized $ \n -> do
     arity <- elements [0..5]
-    name  <- listOf1 arbitrary
+    name  <- listOf1 (arbitrary `suchThat` (`notElem` ("\n\r" :: String)))
     typ   <- naryType arity n
     return $ Const (Arity arity) (Name name) (Type typ)
 
