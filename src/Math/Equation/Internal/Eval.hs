@@ -125,7 +125,7 @@ renderVar v = (gv $$$ nameL) $$$ genOf' (varType v)
   where gv = gvars' (varArity v)
         Name  n = varName  v
         nameL :: TypedExpr [String]
-        nameL = singleton' name
+        nameL = return' $$$ name
         name :: TypedExpr String
         name = TE (asString n)
 
@@ -164,6 +164,27 @@ all' = "all"
 (>>$) :: TypedExpr (IO a -> IO b -> IO b)
 (>>$) = "(>>)"
 
+(>>=$) :: Monad m => TypedExpr (m a -> (a -> m b) -> m b)
+(>>=$) = "(>>=)"
+
+app' :: Applicative f => TypedExpr (f (a -> b) -> f a -> f b)
+app' = "(<*>)"
+
+($<$>$) :: Functor f => TypedExpr (a -> b) -> TypedExpr (f a) -> TypedExpr (f b)
+f $<$>$ x = (fmap' $$$ f) $$$ x
+
+($<*>$) :: Applicative f => TypedExpr (f (a -> b)) -> TypedExpr (f a) -> TypedExpr (f b)
+f $<*>$ x = (app' $$$ f) $$$ x
+
+($>>=$) :: Monad m => TypedExpr (m a) -> TypedExpr (a -> m b) -> TypedExpr (m b)
+x $>>=$ f = join' $$$ ((fmap' $$$ f) $$$ x)
+
+unsafePerformIO' :: TypedExpr (IO a -> a)
+unsafePerformIO' = TE . withMods ["System.IO.Unsafe"] $ "unsafePerformIO"
+
+join' :: Monad m => TypedExpr (m (m a) -> m a)
+join' = TE . withMods ["Control.Monad"] $ "join"
+
 mappend' :: TypedExpr a -> TypedExpr a -> TypedExpr a
 mappend' x y = (TE "mappend" $$$ x) $$$ y
 
@@ -185,12 +206,7 @@ compose' f g = ("(.)" $$$ f) $$$ g
 unlines' :: TypedExpr ([String] -> String)
 unlines' = "unlines"
 
--- Not in Prelude, but nice to have
-
-singleton' :: TypedExpr a -> TypedExpr [a]
-singleton' x = return' $$$ x
-
--- Type synonyms for verbose QuickSpec signatures
+-- Type synonyms for verbose QuickSpec types
 
 type QSSig = Test.QuickSpec.Signature.Sig
 
@@ -205,7 +221,7 @@ type Univ = [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
 -- Used in place of Test.QuickSpec.Term.Strategy, to avoid impredicativity
 data Strategy where
 
-data Eqs where
+type Eqs = [Test.QuickSpec.Equation.Equation]
 
 -- Ensures that QuickSpec is available during evaluation
 withQS = withPkgs ["quickspec"] . withMods ["Test.QuickSpec",
@@ -329,15 +345,22 @@ addUndefineds = tlam "sig" body
 
 getPruned' :: TypedExpr ((Ctx, Reps) -> Eqs -> Eqs)
 getPruned' = tlam "(ctx,reps)" body
-  where body = (((prune' $$$ ctx') $$$ reps) $$$ id')
-        reps = (filter' $$$ pred) $$$ er
+  where reps' = "reps" :: TypedExpr Reps
+        ctx'  = "ctx"  :: TypedExpr Ctx
+        body  = (((prune' $$$ ctx') $$$ reps) $$$ id')
+        reps  = (filter' $$$ pred) $$$ er
         pred :: TypedExpr (Test.QuickSpec.Term.Term -> Bool)
         pred = compose' not' isUndefined'
         er   = (map' $$$ erase') $$$ reps'
-        reps' :: TypedExpr Reps
-        reps' = "reps"
-        ctx' :: TypedExpr Ctx
-        ctx' = "ctx"
+
+--prune :: [Equation] -> IO (Maybe [Equation])
+prune eqs = tlam "sig" body $$$ render sig
+  where body   = (getPruned' $<$>$ ctxRep) $<*>$ (return' $$$ eqs')
+        sig    = sigFromEqs eqs
+        eqs'   = renderEqs eqs
+        ctxRep = getCtxRep sig
+
+parseEqs = undefined
 
 doReps' :: Sig -> TypedExpr (IO Reps)
 doReps' s = (fmap' $$$ getReps') $$$ doClasses' s

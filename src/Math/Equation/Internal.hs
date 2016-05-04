@@ -2,19 +2,27 @@
 module Math.Equation.Internal (
     module Math.Equation.Internal.Eval
   , module Math.Equation.Internal.Types
+  , classesFromEqs
   ) where
 
+import Data.List
+import Language.Eval.Internal
 import Math.Equation.Internal.Eval  -- Used for interacting with QuickSpec
 import Math.Equation.Internal.Types -- Our own representations
 
-{-
-prune :: [Equation] -> IO (Maybe [Equation])
-prune eqs = eval' exec expr
-  where expr = lambda ["sig"] body $$ render sig
-        body = (getPruned' $$ getCtxRep sig) $$ eqs'
-        sig  = sigFrom eqs
-        eqs' = renderEqs eqs
--}
+classesFromEqs :: [Equation] -> [[Term]]
+classesFromEqs = map nub . addAllToClasses []
+
+addAllToClasses cs    []  = cs
+addAllToClasses cs (e:es) = addAllToClasses (addToClasses cs e) es
+
+addToClasses cs (Eq l r) = case cs of
+  []   -> [[l, r]]
+  x:xs -> if l `elem` x
+             then (r:x):xs
+             else if r `elem` x
+                     then (l:x):xs
+                     else x : addToClasses xs (Eq l r)
 
 {-
 data Equation = Eq Term Term

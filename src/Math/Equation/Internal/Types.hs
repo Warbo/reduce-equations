@@ -1,14 +1,50 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Math.Equation.Internal.Types where
 
-import Data.Aeson
-import Data.List
+import           Control.Monad
+import           Data.Aeson
+import           Data.List
+import           Data.Stringable
+import qualified Data.Text       as T
 
 -- Types to represent equations, constants, variables, etc. and functions for
 -- converting between representations
 
-data Equation = Eq Term Term deriving (Eq, Show)
+data Equation = Eq Term Term deriving (Eq)
+
+instance ToJSON Equation where
+  toJSON (Eq l r) = object [
+                        "relation" .= toJSON ("~=" :: String),
+                        "lhs"      .= toJSON l,
+                        "rhs"      .= toJSON r
+                      ]
+
+instance FromJSON Equation where
+  parseJSON (Object v) = Eq <$> v .: "lhs" <*> v .: "rhs"
+  parseJSON _          = mzero
+
+instance Show Equation where
+  show = toString . encode . toJSON
 
 data Term = App Term Term | C Const | V Var deriving (Show, Eq)
+
+instance ToJSON Term where
+  toJSON t = case t of
+    C c     -> toJSON c
+    V v     -> toJSON v
+    App l r -> object ["role" .= ("application" :: String),
+                       "lhs"  .= toJSON l,
+                       "rhs"  .= toJSON r]
+
+instance FromJSON Term where
+  parseJSON (Object v) = do
+    role <- v .: "role"
+    case (role :: String) of
+         "variable"    -> V <$> parseJSON (Object v)
+         "constant"    -> C <$> parseJSON (Object v)
+         "application" -> App <$> v .: "lhs" <*> v .: "rhs"
+  parseJSON _          = mzero
 
 data Sig = Sig [Const] [Var] deriving (Show)
 
@@ -20,11 +56,48 @@ instance Eq Sig where
 
 data Var = Var Type Int Arity deriving (Show, Eq)
 
+instance ToJSON Var where
+  toJSON (Var t i a) = object ["role" .= ("variable" :: String),
+                               "type" .= toJSON t,
+                               "id"   .= toJSON i]
+
+instance FromJSON Var where
+  parseJSON (Object v) = do
+    t <- v .: "type"
+    i <- v .: "id"
+    return (Var (Type t) i (Arity (countArity t)))
+  parseJSON _          = mzero
+
+countArity t = doCount t "->"
+
+doCount haystack needle = T.count (T.pack needle) (T.pack haystack)
+
 data Const = Const Arity Name Type deriving (Show, Eq)
+
+instance ToJSON Const where
+  toJSON (Const a n t) = object ["role"   .= ("constant" :: String),
+                                 "symbol" .= toJSON n]
+
+instance FromJSON Const where
+  parseJSON (Object v) = do
+    t <- v .: "type"
+    s <- v .: "symbol"
+    return (Const (Arity (countArity t)) s (Type t))
+  parseJSON _          = mzero
 
 data Type = Type String deriving (Show, Eq)
 
+instance ToJSON Type where
+  toJSON (Type s) = toJSON s
+
 data Name = Name String deriving (Show, Eq)
+
+instance ToJSON Name where
+  toJSON (Name n) = toJSON n
+
+instance FromJSON Name where
+  parseJSON (String s) = return (Name (toString s))
+  parseJSON _          = mzero
 
 data Arity = Arity Int deriving (Show, Eq)
 

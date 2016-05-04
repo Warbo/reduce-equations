@@ -1,12 +1,15 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings, PartialTypeSignatures #-}
 
 module Main where
 
-import Data.Aeson
+import           Data.Aeson
 import qualified Data.ByteString as B
-import Data.ByteString.Lazy.Char8 (pack, unpack)
-import Data.List
-import Data.Maybe
+import           Data.ByteString.Lazy.Char8 (pack, unpack)
+import           Data.Char
+import           Data.List
+import           Data.Maybe
+import qualified Data.Sequence   as Seq
+import qualified Data.Stringable as S
 import Language.Eval.Internal
 import System.Directory
 import System.IO.Unsafe
@@ -21,25 +24,33 @@ import Math.Equation.Reduce
 import Math.Equation.Internal
 
 main = defaultMain $ testGroup "All tests" [
-    testProperty "Can parse example equations" canParseExamples
-  , testProperty "Can evaluate equations"      canEvalExamples
-  , testProperty "Can make signature"          canMakeSignature
-  , testProperty "Constants added"             constantsAdded
-  , testProperty "Variables added"             variablesAdded
-  , testProperty "Sigs render"                 sigsRender
-  , testProperty "Sigs have constants"         sigsHaveConsts
-  , testProperty "Sigs have variables"         sigsHaveVars
-  , testProperty "Constants are distinct"      sigConstsUniqueIndices
-  , testProperty "Variables are distinct"      sigVarsUniqueIndices
-  , testProperty "Can generate terms from sig" canGenerateFromSig
-  , testProperty "Can get classes from sig"    canGetClassesFromSig
-  , testProperty "Can get universe from sig"   canGetUnivFromSig
-  , testProperty "Can get context from sig"    canGetCxtFromSig
-  , testProperty "Can get reps from sig"       canGetRepsFromSig
-  , testProperty "Can get sig from equations"  canGetSigFromEqs
-  , testProperty "Sig has equation variables"  eqSigHasVars
-  , testProperty "Sig has equation constants"  eqSigHasConsts
-  , testProperty "Can render equations"        canRenderEqs
+    testProperty "Can parse example equations"  canParseExamples
+  , testProperty "Can evaluate equations"       canEvalExamples
+  , testProperty "Can make signature"           canMakeSignature
+  , testProperty "Constants added"              constantsAdded
+  , testProperty "Variables added"              variablesAdded
+  , testProperty "Sigs render"                  sigsRender
+  , testProperty "Sigs have constants"          sigsHaveConsts
+  , testProperty "Sigs have variables"          sigsHaveVars
+  , testProperty "Constants are distinct"       sigConstsUniqueIndices
+  , testProperty "Variables are distinct"       sigVarsUniqueIndices
+  , testProperty "Can find closure of term"     canFindClosure
+  , testProperty "Can generate terms from sig"  canGenerateFromSig
+  , testProperty "No classes without equations" noClassesFromEmptyEqs
+  , testProperty "Equation induces a class"     oneClassFromEq
+  , testProperty "Classes contain given terms"  classesHaveTerms
+  , testProperty "Equal terms in same class"    eqPartsAppearInSameClass
+  , testProperty "Terms appear in one class"    classesHaveNoDupes
+  , testProperty "Class elements are equal"     classElementsAreEqual
+  , testProperty "Non-equal elements separate"  nonEqualElementsSeparate
+  , testProperty "Can get classes from sig"     canGetClassesFromEqs
+  , testProperty "Can get universe from sig"    canGetUnivFromSig
+  , testProperty "Can get context from sig"     canGetCxtFromSig
+  , testProperty "Can get reps from sig"        canGetRepsFromSig
+  , testProperty "Can get sig from equations"   canGetSigFromEqs
+  , testProperty "Sig has equation variables"   eqSigHasVars
+  , testProperty "Sig has equation constants"   eqSigHasConsts
+  , testProperty "Can render equations"         canRenderEqs
   --, testProperty "Can get prune equations"     canPruneEquations
   ]
 
@@ -92,8 +103,9 @@ sigConstsUniqueIndices = once sigConstsUniqueIndices'
 -- Use `c` to generate a bunch of similar constants `consts`, add them to `s` to
 -- get `sig`. Render `sig` to a QuickSpec signature, then print out its constant
 -- symbols and compare with those of `sig`.
-sigConstsUniqueIndices' s (Const a (Name n) t) = testEval mkExpr hasConsts
-  where mkExpr () = let syms  = constantSymbols' $$$ render sig
+sigConstsUniqueIndices' s (Const a (Name n') t) = testEval mkExpr hasConsts
+  where n = 'x' : n'  -- Avoid issues with linefeed being cut off
+        mkExpr () = let syms  = constantSymbols' $$$ render sig
                         names = (map' $$$ name') $$$ syms
                         e     = unlines' $$$ names
                      in (e, ("consts", consts))
@@ -123,9 +135,103 @@ canGenerateFromSig = testExec mkExpr endsInTrue
   where mkExpr s = let e = ((>>$) $$$ doGenerate' s) $$$ putTrue
                     in (e, ())
 
-canGetClassesFromSig = testExec mkExpr endsInTrue
-  where mkExpr s = let e = ((>>$) $$$ doClasses' s) $$$ putTrue
-                    in (e, ())
+noClassesFromEmptyEqs = null (classesFromEqs [])
+
+oneClassFromEq eq = length (classesFromEqs [eq]) == 1
+
+classesHaveTerms eqs = found `all` terms
+  where terms            = concatMap termsOf eqs
+        termsOf (Eq l r) = [l, r]
+        found t          = (t `elem`) `any` classes
+        classes          = classesFromEqs eqs
+
+eqPartsAppearInSameClass eqs = all eqPartsInSameClass eqs
+  where classes                     = classesFromEqs eqs
+        matchingClass t             = head $ filter (t `elem`) classes
+        eqPartsInSameClass (Eq l r) = r `elem` (matchingClass l) &&
+                                      l `elem` (matchingClass r)
+
+classesHaveNoDupes eqs = all appearOnce terms
+  where classes      = classesFromEqs eqs
+        terms        = concat classes
+        appearOnce t = length (filter (t `elem`) classes) == 1
+
+nonEqualElementsSeparate t v = match classes expected && match expected classes
+  where (a:b:c:d:e:f:_) = map extend [0..]
+
+        extend 0 = t
+        extend n = App v (extend (n-1))
+
+        eqs = [Eq a b, Eq b c, Eq d e, Eq e f]
+
+        classes = classesFromEqs eqs
+
+        expected = [[a, b, c], [d, e, f]]
+
+        match    []  ys = True
+        match (x:xs) ys = any (setEq x) ys && match xs ys
+
+classElementsAreEqual :: [Equation] -> _
+classElementsAreEqual eqs = all elementsAreEqual classes
+  where classes :: [[Term]]
+        classes              = classesFromEqs eqs
+
+        terms                = nub $ concatMap termsOf eqs
+        termsOf (Eq x y)     = [x, y]
+
+        elementsAreEqual :: [Term] -> Bool
+        elementsAreEqual cls = all (equalToAll cls) cls
+
+        equalToAll :: [Term] -> Term -> Bool
+        equalToAll xs y = all (equal y) xs
+
+        equal :: Term -> Term -> Bool
+        equal x y = y `isElem` eqClosure eqs x
+
+canFindClosure t v = all match expected
+  where -- Generate unique terms by wrapping in "App c"
+        (a:b:c:d:e:f:g:h:_) = map extend [0..]
+        extend 0 = t
+        extend n = App v (extend (n-1))
+
+        match (x, xs) = setEq (eqClosure eqs x) xs
+
+        eqs = [Eq a b, Eq a c, Eq b d, Eq b b, Eq f g, Eq f h]
+
+        abcd     = [a, b, c, d]
+        fgh      = [f, g, h]
+        expected = [(a, abcd), (b, abcd), (c, abcd), (d, abcd),
+                    (e, [e]),
+                    (f, fgh), (g, fgh), (h, fgh)]
+
+-- | The list of all terms equal to `x`, according to `eqs`
+eqClosure :: [Equation] -> Term -> Seq.Seq Term
+eqClosure eqs x = indirect eqs Seq.empty (directEq eqs x)
+
+indirect :: [Equation] -> Seq.Seq Term -> Seq.Seq Term -> Seq.Seq Term
+indirect eqs seen xs | null xs   = seen
+indirect eqs seen xs | otherwise = indirect eqs (nub' $ seen Seq.>< unseen) unseen
+  where new       = xs >>= directEq eqs
+        unseen    = nub' $ Seq.filter notSeen new
+        notSeen a = not (a `isElem` seen)
+
+nub' = foldl f Seq.empty
+  where f acc x = if x `isElem` acc
+                     then acc
+                     else x Seq.<| acc
+
+isElem x xs = isJust (Seq.elemIndexL x xs)
+
+-- | The list of terms equal to `x` by definition, according to `eqs`
+directEq :: [Equation] -> Term -> Seq.Seq Term
+directEq eqs x = x Seq.<| Seq.filter direct terms
+  where terms            = Seq.fromList . nub . concatMap termsOf $ eqs
+        termsOf (Eq a b) = [a, b]
+        direct a         = Eq x a `elem` eqs || Eq a x `elem` eqs
+
+canGetClassesFromEqs :: [Equation] -> _
+canGetClassesFromEqs eqs = True
+  where typeCheck = classesFromEqs eqs
 
 canGetUnivFromSig = testExec mkExpr endsInTrue
   where mkExpr s = let e = ((>>$) $$$ doUniv' s) $$$ putTrue
@@ -162,18 +268,29 @@ eqSigHasConsts eqs = counterexample debug test
                           ("sigconsts", sigconsts),
                           ("eqconsts",  eqconsts))
 
-canRenderEqs = once . forAll (resize 100 arbitrary) $ canRenderEqs'
+canRenderEqs = once . forAll (return <$> resize 3 arbitrary) $ canRenderEqs'
 
+canRenderEqs' :: [Equation] -> _
 canRenderEqs' eqs = testEval mkExpr haveEqs
-  where mkExpr () = (unlines' $$$ shownEqs', debug)
+  where mkExpr () = (expr, debug)
+        expr      = unlines' $$$ shownEqs'
         sig'      = render (sigFromEqs eqs)
         shownEqs' = (map' $$$ (showEquation' $$$ sig')) $$$ eqs'
-        eqs'      = renderEqs eqs
+        eqs'      = unsafePerformIO' $$$ (prune eqs)
         debug     = (("eqs",  eqs),
                      ("sig'", sig'),
                      ("eqs'", eqs'))
+        lToEq l   = unsafePerformIO $ do
+                      print ("GOT LINE: " ++ l)
+                      return (lToEq' l)
+        lToEq' l  = case eitherDecode' (S.fromString l) of
+                         Left  e  -> error e
+                         Right eq -> eq
+        keep ('D':'e':'p':'t':'h':_) = False
+        keep _ = True
         haveEqs Nothing  = error "Failed to eval"
-        haveEqs (Just s) = setEq (lines s) (map show eqs)
+        haveEqs (Just s) = setEq (map lToEq (filter keep (lines s)))
+                                 eqs
 
 -- Helpers
 
@@ -253,11 +370,15 @@ withExamples = forAll (elements exampleEqs)
 
 instance Arbitrary Equation where
   arbitrary = Eq <$> arbitrary <*> arbitrary
+  shrink (Eq l r) = [Eq l' r' | (l', r') <- shrink (l, r)]
 
 instance Arbitrary Term where
   arbitrary = oneof [App <$> arbitrary <*> arbitrary,
-                     C <$> arbitrary,
-                     V <$> arbitrary]
+                     C   <$> arbitrary,
+                     V   <$> arbitrary]
+  shrink (C c)     = C <$> shrink c
+  shrink (V v)     = V <$> shrink v
+  shrink (App l r) = [l, r] ++ [App l' r' | (l', r') <- shrink (l, r)]
 
 instance Arbitrary Var where
   arbitrary = sized $ \n -> do
@@ -275,6 +396,8 @@ instance Arbitrary Const where
 
 instance Arbitrary Sig where
   arbitrary = Sig <$> listOf arbitrary <*> listOf arbitrary
+  shrink (Sig [] []) = []
+  shrink (Sig cs vs) = Sig [] [] : [Sig cs' vs' | (cs', vs') <- shrink (cs, vs)]
 
 instance Arbitrary Type where
   arbitrary = Type <$> sized sizedType
