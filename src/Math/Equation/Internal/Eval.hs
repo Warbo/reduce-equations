@@ -355,15 +355,13 @@ getPruned' = tlam "(ctx,reps)" body
 
 --prune :: [Equation] -> IO (Maybe [Equation])
 prune eqs = tlam "sig" body $$$ render sig
-  where body   = (getPruned' $<$>$ ctxRep) $<*>$ (return' $$$ eqs')
-        sig    = sigFromEqs eqs
-        eqs'   = renderEqs eqs
-        ctxRep = getCtxRep sig
+  where body    = (getPruned' $<$>$ ctxRep) $<*>$ (return' $$$ eqs')
+        sig     = sigFromEqs eqs
+        eqs'    = renderEqs eqs
+        ctxRep  = getCtxRep sig
+        classes = classesFromEqs eqs
 
 parseEqs = undefined
-
-doReps' :: Sig -> TypedExpr (IO Reps)
-doReps' s = (fmap' $$$ getReps') $$$ doClasses' s
 
 getReps' :: TypedExpr ([Test.QuickSpec.Utils.Typed.Some (Test.QuickSpec.Utils.Typed.O f g)]
                     -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term])

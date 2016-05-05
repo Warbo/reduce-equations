@@ -46,7 +46,6 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Can get classes from sig"     canGetClassesFromEqs
   , testProperty "Can get universe from sig"    canGetUnivFromSig
   , testProperty "Can get context from sig"     canGetCxtFromSig
-  , testProperty "Can get reps from sig"        canGetRepsFromSig
   , testProperty "Can get sig from equations"   canGetSigFromEqs
   , testProperty "Sig has equation variables"   eqSigHasVars
   , testProperty "Sig has equation constants"   eqSigHasConsts
@@ -239,10 +238,6 @@ canGetUnivFromSig = testExec mkExpr endsInTrue
 
 canGetCxtFromSig = testExec mkExpr endsInTrue
   where mkExpr s = let e = ((>>$) $$$ doCtx' s) $$$ putTrue
-                    in (e, ())
-
-canGetRepsFromSig = testExec mkExpr endsInTrue
-  where mkExpr s = let e = ((>>$) $$$ doReps' s) $$$ putTrue
                     in (e, ())
 
 canGetSigFromEqs eqs = case sigFromEqs eqs of
