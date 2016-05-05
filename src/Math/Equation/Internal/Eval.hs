@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, PartialTypeSignatures #-}
 
 module Math.Equation.Internal.Eval where
 
@@ -322,15 +322,61 @@ genOf' :: Type -> TypedExpr (Test.QuickCheck.Gen.Gen a)
 genOf' (Type t) = return' $$$ undef
   where undef = TE . raw $ "undefined :: (" ++ t ++ ")"
 
+{-
 getClasses' :: TypedExpr (Test.QuickSpec.Utils.TypeMap.TypeMap (Test.QuickSpec.Utils.Typed.O Test.QuickSpec.TestTree.TestResults Test.QuickSpec.Term.Expr) -> Cls)
 getClasses' = compose' cm tmToList'
   where cm  = concatMap' $$$ (some2' $$$ cls)
         cls = compose' mp classes'
         mp  = map' $$$ (compose' conSome' conO')
+-}
 
-doCtx' s = (fmap' $$$ (getCtxSimple' $$$ render s)) $$$ doUniv' s
+classesFromEqs :: [Equation] -> [[Term]]
+classesFromEqs = map nub . addAllToClasses []
 
-getCtxSimple' :: TypedExpr (QSSig -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term] -> Ctx)
+addAllToClasses cs    []  = cs
+addAllToClasses cs (e:es) = addAllToClasses (addToClasses cs e) es
+
+addToClasses cs (Eq l r) = case cs of
+  []   -> [[l, r]]
+  x:xs -> if l `elem` x
+             then (r:x):xs
+             else if r `elem` x
+                     then (l:x):xs
+                     else x : addToClasses xs (Eq l r)
+
+getClasses' :: [Equation] -> TypedExpr Cls
+getClasses' eqs = mkClasses classes
+  where classes = classesFromEqs eqs
+
+mkClasses :: [[Term]] -> TypedExpr Cls
+mkClasses [] = nil'
+mkClasses (c:cs) = (cons' $$$ mkClass c) $$$ mkClasses cs
+
+-- Note: Maybe is a placeholder for Expr, to avoid impredicativity
+
+mkClass :: [Term] -> TypedExpr (Test.QuickSpec.Utils.Typed.Some (Test.QuickSpec.Utils.Typed.O [] Maybe))
+mkClass ts = conSome' $$$ (conO' $$$ l ts)
+  where l    []  = nil'
+        l (x:xs) = (cons' $$$ termToSomeExpr x) $$$ l xs
+
+termToSomeExpr :: Term -> TypedExpr (Test.QuickSpec.Utils.Typed.Some (Test.QuickSpec.Utils.Typed.O [] Maybe))
+termToSomeExpr t = conSome' $$$ (conO' $$$ ((cons' $$$ expr) $$$ nil'))
+  where expr = (("Expr" $$$ term) $$$ arity) $$$ eval
+        term  = renderTerm t
+        arity = TE (raw (show (termArity t)))
+        eval  = "undefined" -- Seems to be used for variable instantiation
+
+termArity :: Term -> Int
+termArity (C c)     = case constArity c of
+                           Arity a -> a
+termArity (V v)     = case varArity   v of
+                           Arity a -> a
+termArity (App l r) = termArity l - 1
+
+doCtx' :: [Equation] -> Sig -> TypedExpr Ctx
+doCtx' eqs s = (getCtxSimple' $$$ render s) $$$ doUniv' eqs s
+
+getCtxSimple' :: TypedExpr (QSSig -> _ -> Ctx)
 getCtxSimple' = tlam "sig" body
   where body = (initial' $$$ depth) $$$ syms
         sig :: TypedExpr QSSig
@@ -355,10 +401,10 @@ getPruned' = tlam "(ctx,reps)" body
 
 --prune :: [Equation] -> IO (Maybe [Equation])
 prune eqs = tlam "sig" body $$$ render sig
-  where body    = (getPruned' $<$>$ ctxRep) $<*>$ (return' $$$ eqs')
+  where body    = (getPruned' $$$ ctxRep) $$$ eqs'
         sig     = sigFromEqs eqs
         eqs'    = renderEqs eqs
-        ctxRep  = getCtxRep sig
+        ctxRep  = getCtxRep eqs sig
         classes = classesFromEqs eqs
 
 parseEqs = undefined
@@ -398,22 +444,20 @@ getGenerate' :: TypedExpr (QSSig -> IO (Test.QuickSpec.Utils.TypeMap.TypeMap (Te
 getGenerate' = (generate' $$$ "False") $$$ (TE strat)
   where TE strat = (const' $$$ partialGen')
 
-doClasses' :: Sig -> TypedExpr (IO Cls)
-doClasses' s = (fmap' $$$ getClasses') $$$ doGenerate' s
-
-doUniv' s = (fmap' $$$ getUniv') $$$ doClasses' s
+doUniv' :: [Equation] -> Sig -> TypedExpr _
+doUniv' eqs s = getUniv' $$$ getClasses' eqs
 
 getUniv' = "concatMap" $$$ f
   where f = some2' $$$ m
         m = map' $$$ t
         t = tagged' $$$ term'
 
-getCtxRep :: Sig -> TypedExpr (IO (Ctx, Reps))
-getCtxRep s = func $$$ render s
-  where func :: TypedExpr (QSSig -> IO (Ctx, Reps))
+getCtxRep :: [Equation] -> Sig -> TypedExpr (Ctx, Reps)
+getCtxRep eqs s = func $$$ render s
+  where func :: TypedExpr (QSSig -> (Ctx, Reps))
         func = tlam "sig" funcbody
-        funcbody :: TypedExpr (IO (Ctx, Reps))
-        funcbody = (fmap' $$$ (compose' f getClasses')) $$$ (getGenerate' $$$ sig')
+        funcbody :: TypedExpr (Ctx, Reps)
+        funcbody = f $$$ getClasses' eqs
         f :: TypedExpr (Cls -> (Ctx, Reps))
         f       = tlam "cls" body
         body = ("(,)" $$$ ctx) $$$ rep

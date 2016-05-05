@@ -232,12 +232,13 @@ canGetClassesFromEqs :: [Equation] -> _
 canGetClassesFromEqs eqs = True
   where typeCheck = classesFromEqs eqs
 
-canGetUnivFromSig = testExec mkExpr endsInTrue
-  where mkExpr s = let e = ((>>$) $$$ doUniv' s) $$$ putTrue
+canGetUnivFromSig :: [Equation] -> _
+canGetUnivFromSig eqs = testExec mkExpr endsInTrue
+  where mkExpr s = let e = (return' $$$ doUniv' eqs s) $$$ putTrue
                     in (e, ())
 
-canGetCxtFromSig = testExec mkExpr endsInTrue
-  where mkExpr s = let e = ((>>$) $$$ doCtx' s) $$$ putTrue
+canGetCxtFromSig eqs = testExec mkExpr endsInTrue
+  where mkExpr s = let e = (return' $$$ doCtx' eqs s) $$$ putTrue
                     in (e, ())
 
 canGetSigFromEqs eqs = case sigFromEqs eqs of
@@ -271,7 +272,7 @@ canRenderEqs' eqs = testEval mkExpr haveEqs
         expr      = unlines' $$$ shownEqs'
         sig'      = render (sigFromEqs eqs)
         shownEqs' = (map' $$$ (showEquation' $$$ sig')) $$$ eqs'
-        eqs'      = unsafePerformIO' $$$ (prune eqs)
+        eqs'      = prune eqs
         debug     = (("eqs",  eqs),
                      ("sig'", sig'),
                      ("eqs'", eqs'))
