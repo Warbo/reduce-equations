@@ -23,7 +23,7 @@ import qualified Test.QuickSpec.Term
 import Math.Equation.Reduce
 import Math.Equation.Internal
 
-main = defaultMain $ testGroup "All tests" [
+main = defaultMain $ testGroup "All tests" [{-
     testProperty "Can parse example equations"  canParseExamples
   , testProperty "Can evaluate equations"       canEvalExamples
   , testProperty "Can make signature"           canMakeSignature
@@ -50,7 +50,7 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Sig has equation variables"   eqSigHasVars
   , testProperty "Sig has equation constants"   eqSigHasConsts
   , testProperty "Can render equations"         canRenderEqs
-  --, testProperty "Can get prune equations"     canPruneEquations
+  ,-} testProperty "Can prune equations"          canPruneEqs
   ]
 
 -- Tests
@@ -131,7 +131,7 @@ sigVarsUniqueIndices' s (Var t _ a) = testEval mkExpr hasVars
         sig  = withVars vars s
 
 canGenerateFromSig = testExec mkExpr endsInTrue
-  where mkExpr s = let e = ((>>$) $$$ doGenerate' s) $$$ putTrue
+  where mkExpr s = let e = doGenerate' s >>$ putTrue
                     in (e, ())
 
 noClassesFromEmptyEqs = null (classesFromEqs [])
@@ -234,11 +234,11 @@ canGetClassesFromEqs eqs = True
 
 canGetUnivFromSig :: [Equation] -> _
 canGetUnivFromSig eqs = testExec mkExpr endsInTrue
-  where mkExpr s = let e = (return' $$$ doUniv' eqs s) $$$ putTrue
+  where mkExpr s = let e = doUniv' eqs s $>>$ putTrue
                     in (e, ())
 
 canGetCxtFromSig eqs = testExec mkExpr endsInTrue
-  where mkExpr s = let e = (return' $$$ doCtx' eqs s) $$$ putTrue
+  where mkExpr s = let e = doCtx' eqs s $>>$ putTrue
                     in (e, ())
 
 canGetSigFromEqs eqs = case sigFromEqs eqs of
@@ -288,6 +288,18 @@ canRenderEqs' eqs = testEval mkExpr haveEqs
         haveEqs (Just s) = setEq (map lToEq (filter keep (lines s)))
                                  eqs
 
+canPruneEqs = once . forAll (return <$> resize 3 arbitrary) $ canPruneEqs'
+
+canPruneEqs' eqs = once $ monadicIO $ do
+    out <- run $ eval expr
+    monitor (counterexample (show (("eqs", eqs), ("expr", expr), ("out", out))))
+    assert False
+  where TE expr   = indent (unlines' $$$ shownEqs')
+        shownEqs' = (map' $$$ (showEquation' $$$ sig')) $$$ pruned
+        pruned    = unSomePrune sig' clss
+        clss      = unSomeClasses eqs
+        sig'      = render (sigFromEqs eqs)
+
 -- Helpers
 
 setEq xs ys = all (`elem` xs) ys && all (`elem` ys) xs
@@ -324,11 +336,13 @@ testEval' :: (Arbitrary a, Show a, Show b) => (TypedExpr e -> IO (Maybe String))
 testEval' evl mkExpr expect = forAll (resize 10 arbitrary) go
   where go arg = once $ monadicIO $ do
                    let (e, dbg) = mkExpr arg
-                   result <- run (evl e)
+                   result <- run (evl (indent e))
                    monitor . counterexample . show $ (("expr",   e),
                                                       ("result", result),
                                                       ("debug",  dbg))
                    assert (expect result)
+
+indent (TE e) = TE (withPkgs ["hindent"] e)
 
 constantSymbols' :: TypedExpr (QSSig -> [Test.QuickSpec.Term.Symbol])
 constantSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
