@@ -293,12 +293,19 @@ canPruneEqs = once . forAll (return <$> resize 3 arbitrary) $ canPruneEqs'
 canPruneEqs' eqs = once $ monadicIO $ do
     out <- run $ eval expr
     monitor (counterexample (show (("eqs", eqs), ("expr", expr), ("out", out))))
-    assert False
-  where TE expr   = indent (unlines' $$$ shownEqs')
+    assert (expected out)
+  where TE expr   = indent allExpr
+        allExpr   = "show" $$$ ((pair' $$$ "\"pruned\"") $$$ (unlines' $$$ shownEqs'))
         shownEqs' = (map' $$$ (showEquation' $$$ sig')) $$$ pruned
         pruned    = unSomePrune sig' clss
         clss      = unSomeClasses eqs
         sig'      = render (sigFromEqs eqs)
+        expected Nothing  = error "Got no output"
+        expected (Just o) = if all ((== 1) . length) (classesFromEqs eqs)
+                               then o == ""
+                               else case read o of
+                                         ("pruned", p) -> "==" `isInfixOf` (p :: String)
+                                         _             -> error ("Unexpected output: " ++ o)
 
 -- Helpers
 
