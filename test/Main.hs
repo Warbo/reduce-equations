@@ -50,7 +50,9 @@ main = defaultMain $ testGroup "All tests" [{-
   , testProperty "Sig has equation variables"   eqSigHasVars
   , testProperty "Sig has equation constants"   eqSigHasConsts
   , testProperty "Can render equations"         canRenderEqs
-  ,-} testProperty "Can prune equations"          canPruneEqs
+  , testProperty "Can prune equations"          canPruneEqs
+  , testProperty "Expression types match up" checkEvalTypes
+  , -} testProperty "Can get type of terms"     canGetTermType
   ]
 
 -- Tests
@@ -288,6 +290,88 @@ canRenderEqs' eqs = testEval mkExpr haveEqs
         haveEqs (Just s) = setEq (map lToEq (filter keep (lines s)))
                                  eqs
 
+-- | Check whether we can convince the type-checker that various expressions
+--   have the types we think they do
+checkEvalTypes = once . monadicIO . checkTypes $ exprs
+  where checkTypes [] = return ()
+        checkTypes ((e, t, ms):es) = do
+          out <- run . exec $ mkExpr ms (e `withType` t)
+          case out of
+               Nothing -> do dbg (("expr", e), ("type", t))
+                             assert False
+               Just "" -> assert True
+               Just s  -> do dbg (("expr", e), ("type", t), ("result", s))
+          checkTypes es
+
+        mkExpr :: [Mod] -> TypedExpr a -> TypedExpr (IO ())
+        mkExpr ms e = ("const" $$$ "return ()") $$$ (withMods' ms e)
+
+        -- The expressions we want to check the types of
+        exprs :: [(TypedExpr a, String, [Mod])]
+        exprs = [
+
+          (unType strip', "Test.QuickSpec.Term.Expr a -> a",
+           ["Test.QuickSpec.Term"]),
+
+          (unType prune', "Context -> [Term] -> (a -> Equation) -> [a] -> [a]",
+           ["Test.QuickSpec.Term", "Test.QuickSpec.Equation",
+            "Test.QuickSpec.Reasoning.NaiveEquationalReasoning"]),
+
+          (unType id', "a -> a",
+           []),
+
+          (unType initial', "Int -> [Symbol] -> [Tagged Term] -> Context",
+           ["Test.QuickSpec.Reasoning.NaiveEquationalReasoning",
+            "Test.QuickSpec.Utils.Typed"]),
+
+          (unType maxDepth', "Sig -> Int",
+           []),
+
+          (unType symbols', "Sig -> [Symbol]",
+           []),
+
+          (unType filter', "(a -> Bool) -> [a] -> [a]",
+           []),
+
+          (unType not', "Bool -> Bool",
+           []),
+
+          (unType isUndefined', "Term -> Bool",
+           []),
+
+          (unType (sort' :: TypedExpr ([Bool] -> [Bool])), "[Bool] -> [Bool]",
+           []),
+
+          (unType append', "[a] -> [a] -> [a]",
+           []),
+
+          (unType map', "(a -> b) -> [a] -> [b]",
+           []),
+
+          (unType conTagged', "Witness -> a -> Tagged a",
+           ["Test.QuickSpec.Utils.Typed"]),
+
+          (unType conSome', "f Bool -> Some f",
+           ["Data.Typeable"]),
+
+          (unType conWitness', "a -> Witnessed a",
+           []),
+
+          (unType term', "Expr a -> Term",
+           []),
+
+          (unType univ2, "Test.QuickSpec.Term.Expr Bool -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term",
+           ["Test.QuickSpec.Term", "Test.QuickSpec.Utils.Typed",
+            "Data.Typeable"]),
+
+          (unType (map' $$$ univ2), "[Test.QuickSpec.Term.Expr Bool] -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
+           []),
+
+          (unType (mkUniv2 ["undefined"]), "[Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
+           ["Test.QuickSpec.Term", "Test.QuickSpec.Utils.Typed"])
+
+          ]
+
 canPruneEqs = once . forAll (return <$> resize 3 arbitrary) $ canPruneEqs'
 
 canPruneEqs' eqs = once $ monadicIO $ do
@@ -306,6 +390,13 @@ canPruneEqs' eqs = once $ monadicIO $ do
                                else case read o of
                                          ("pruned", p) -> "==" `isInfixOf` (p :: String)
                                          _             -> error ("Unexpected output: " ++ o)
+
+canGetTermType (Type input) (Type output) = expected (termType term)
+  where term  = App (C (Const undefined undefined func))
+                    (C (Const undefined undefined (Type input)))
+        func  = Type $ concat ["(", input, ") -> (", output, ")"]
+        strip = filter (/= ' ')
+        expected (Just (Type x)) = strip x === strip output
 
 -- Helpers
 
@@ -436,3 +527,6 @@ naryType a n = do
   arg <- sizedType n
   ret <- naryType (a-1) n
   return $ "(" ++ arg ++ ") -> (" ++ ret ++ ")"
+
+dbg :: (Show a, Monad m) => a -> PropertyM m ()
+dbg = monitor . counterexample . show

@@ -374,7 +374,9 @@ mkUniv2 []     = nil'
 mkUniv2 (x:cs) = (append' $$$ ((map' $$$ univ2) $$$ x)) $$$ (mkUniv2 cs)
 
 univ2 :: TypedExpr (Test.QuickSpec.Term.Expr a -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term)
-univ2 = tlam "y" ((conTagged' $$$ (conSome' $$$ (conWitness' $$$ (strip' $$$ "y")))) $$$ (term' $$$ "y"))
+univ2 = tlam "y" body `withType` t
+  where body = (conTagged' $$$ (conSome' $$$ (conWitness' $$$ (strip' $$$ "y")))) $$$ (term' $$$ "y")
+        t    = "Data.Typeable.Typeable a => Test.QuickSpec.Term.Expr a -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term"
 
 conWitness' :: TypedExpr (a -> Test.QuickSpec.Utils.Typed.Witnessed a)
 conWitness' = TE $ qualified "Test.QuickSpec.Utils.Typed" "Witness"
@@ -383,7 +385,7 @@ conTagged' :: TypedExpr (Test.QuickSpec.Utils.Typed.Witness -> a -> Test.QuickSp
 conTagged' = TE $ qualified "Test.QuickSpec.Utils.Typed" "Tagged"
 
 strip' :: TypedExpr (Test.QuickSpec.Term.Expr Test.QuickSpec.Term.Term -> Test.QuickSpec.Term.Term)
-strip' = tlam "x" body `withType` "Test.QuickSpec.Term.Expr Term -> Term"
+strip' = tlam "x" body `withType` "Test.QuickSpec.Term.Expr a -> a"
   where body = TE $ withMods ["Data.Typeable"] "undefined"
 
 getTermHead :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Term.Term]
@@ -547,3 +549,9 @@ getCtxRep eqs s = func $$$ render s
 
 pair' :: TypedExpr (a -> b -> (a, b))
 pair' = "(,)"
+
+unType :: TypedExpr a -> TypedExpr b
+unType (TE e) = TE e
+
+withMods' :: [Mod] -> TypedExpr a -> TypedExpr a
+withMods' ms (TE e) = TE (withMods ms (withQS e))

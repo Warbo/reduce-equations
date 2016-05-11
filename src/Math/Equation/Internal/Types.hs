@@ -6,7 +6,9 @@ import           Control.Monad
 import           Data.Aeson
 import           Data.List
 import           Data.Stringable
-import qualified Data.Text       as T
+import qualified Data.Text        as T
+import           Language.Eval
+import           System.IO.Unsafe
 
 -- Types to represent equations, constants, variables, etc. and functions for
 -- converting between representations
@@ -164,6 +166,29 @@ constArity (Const a n t) = a
 
 constType :: Const -> Type
 constType (Const a n t) = t
+
+termType :: Term -> Maybe Type
+termType (C c)     = Just (constType c)
+termType (V v)     = Just (varType   v)
+termType (App l r) = do
+  Type lType <- termType l
+  Type rType <- termType r
+  let left  = "typeRep ([] :: [" ++ lType ++ "])"
+      right = "typeRep ([] :: [" ++ rType ++ "])"
+      expr' = withMods ["Data.Typeable"] . raw $
+                "funResultTy (" ++ left ++ ") (" ++ right ++ ")"
+      expr  = expr' {
+        eExpr = concat ["case (" ++ eExpr expr' ++ ") of {",
+
+                        " Nothing -> error \"Incompatible types '",
+                        lType, "' '", rType, "'\";",
+
+                        " Just t -> show t;",
+
+                        "}"]
+      }
+  result <- unsafePerformIO (eval expr)
+  return (Type result)
 
 -- JSON conversion
 
