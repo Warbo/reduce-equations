@@ -59,9 +59,10 @@ instance Eq Sig where
 data Var = Var Type Int Arity deriving (Show, Eq)
 
 instance ToJSON Var where
-  toJSON (Var t i a) = object ["role" .= ("variable" :: String),
-                               "type" .= toJSON t,
-                               "id"   .= toJSON i]
+  toJSON (Var t i a) = object ["role"  .= ("variable" :: String),
+                               "type"  .= toJSON t,
+                               "id"    .= toJSON i,
+                               "arity" .= toJSON a]
 
 instance FromJSON Var where
   parseJSON (Object v) = do
@@ -78,7 +79,9 @@ data Const = Const Arity Name Type deriving (Show, Eq)
 
 instance ToJSON Const where
   toJSON (Const a n t) = object ["role"   .= ("constant" :: String),
-                                 "symbol" .= toJSON n]
+                                 "symbol" .= toJSON n,
+                                 "type"   .= toJSON t,
+                                 "arity"  .= toJSON a]
 
 instance FromJSON Const where
   parseJSON (Object v) = do
@@ -102,6 +105,22 @@ instance FromJSON Name where
   parseJSON _          = mzero
 
 data Arity = Arity Int deriving (Show, Eq)
+
+instance ToJSON Arity where
+  toJSON (Arity a) = toJSON a
+
+instance FromJSON Arity where
+  parseJSON (Number n) = Arity <$> parseJSON (Number n)
+  parseJSON _          = mzero
+
+instance Num Arity where
+  fromInteger = Arity . fromInteger
+  (Arity a) + (Arity b) = Arity (a + b)
+  (Arity a) - (Arity b) = Arity (a - b)
+  (Arity a) * (Arity b) = Arity (a * b)
+  negate (Arity a) = Arity (negate a)
+  abs (Arity a) = Arity (abs a)
+  signum (Arity a) = Arity (signum a)
 
 -- Sig construction
 
@@ -190,6 +209,9 @@ termType (App l r) = do
   result <- unsafePerformIO (eval expr)
   return (Type result)
 
+termType' :: Term -> Type
+termType' t = let Just x = termType t in x
+
 -- JSON conversion
 
 sigFrom :: [Object] -> Sig
@@ -200,3 +222,8 @@ constsFrom _ = []
 
 varsFrom :: [Object] -> [Var]
 varsFrom _ = []
+
+termArity :: Term -> Arity
+termArity (C c)     = constArity c
+termArity (V v)     = varArity v
+termArity (App l r) = termArity l - 1

@@ -339,18 +339,26 @@ getClasses' = compose' cm tmToList'
 -}
 
 classesFromEqs :: [Equation] -> [[Term]]
-classesFromEqs = map nub . addAllToClasses []
+classesFromEqs = combine [] . map nub . addAllToClasses []
 
 addAllToClasses cs    []  = cs
 addAllToClasses cs (e:es) = addAllToClasses (addToClasses cs e) es
 
 addToClasses cs (Eq l r) = case cs of
   []   -> [[l, r]]
-  x:xs -> if l `elem` x
-             then (r:x):xs
-             else if r `elem` x
-                     then (l:x):xs
-                     else x : addToClasses xs (Eq l r)
+  x:xs -> if l `elem` x || r `elem` x
+             then (l:r:x):xs
+             else x : addToClasses xs (Eq l r)
+
+combine acc []     = acc
+combine []  (c:cs) = combine [c] cs
+combine acc (c:cs) = case nub (overlaps c) of
+                          [] -> combine (c:acc) cs
+                          xs -> combine [c ++ concat xs] (without xs)
+  where classesWith t   = filter (t `elem`) (acc ++ cs)
+        overlaps []     = []
+        overlaps (t:ts) = classesWith t ++ overlaps ts
+        without xs      = filter (`notElem` xs) (acc ++ cs)
 
 getClasses' :: [Equation] -> TypedExpr Cls
 getClasses' eqs = mkClasses classes
@@ -405,33 +413,36 @@ mkClasses [] = nil'
 mkClasses (c:cs) = (cons' $$$ mkClass c) $$$ mkClasses cs
 --mkClasses (c:cs) = (append' $$$ mkClass c) $$$ mkClasses cs
 
-mkClass :: [Term] -> TypedExpr (Test.QuickSpec.Utils.Typed.Some (Test.QuickSpec.Utils.Typed.O [] _))
+mkClass :: [Term] -> TypedExpr (Test.QuickSpec.Utils.Typed.Some (Test.QuickSpec.Utils.Typed.O [] Test.QuickSpec.Term.Expr))
 mkClass ts = conSome' $$$ (conO' $$$ l ts)
   where l    []  = nil'
         l (x:xs) = (cons' $$$ termToExpr x) $$$ l xs
 
 termToExpr :: Term -> TypedExpr (Test.QuickSpec.Term.Expr a)
-termToExpr t = expr
-  where expr = ((expr' $$$ term) $$$ arity) $$$ eval
-        term  = renderTerm t
-        arity = TE (raw (show (termArity t))) :: TypedExpr Int
-        eval  = "undefined" -- Seems to be used for variable instantiation
-        expr' = "Expr" :: TypedExpr (_ -> Int -> _ -> Test.QuickSpec.Term.Expr _)
+termToExpr t = ((expr' $$$ term) $$$ arity) $$$ eval
+  where term  = renderTerm t
+
+        arity :: TypedExpr Int
+        arity = TE (raw (show (let Arity a = termArity t in a)))
+
+        -- Used for variable instantiation (which we avoid) and specifying type
+        eval  = "undefined" `withType` ("Valuation -> (" ++ typ ++ ")")
+
+        typ   = case termType t of
+                     Nothing -> error ("Couldn't get type of " ++ show t)
+                     Just (Type x) -> x
+
+        expr' :: TypedExpr (_ -> Int -> _ -> Test.QuickSpec.Term.Expr _)
+        expr' = "Expr"
+
 
 append' :: TypedExpr ([a] -> [a] -> [a])
 append' = "(++)"
 
-termArity :: Term -> Int
-termArity (C c)     = case constArity c of
-                           Arity a -> a
-termArity (V v)     = case varArity   v of
-                           Arity a -> a
-termArity (App l r) = termArity l - 1
-
 doCtx' :: [Equation] -> Sig -> TypedExpr Ctx
 doCtx' eqs s = (getCtxSimple' $$$ render s) $$$ doUniv' eqs s
 
-getCtxSimple' :: TypedExpr (QSSig -> _ -> Ctx)
+getCtxSimple' :: TypedExpr (QSSig -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term] -> Ctx)
 getCtxSimple' = tlam "sig" body
   where body = (initial' $$$ depth) $$$ syms
         sig = "sig" :: TypedExpr QSSig
@@ -510,7 +521,7 @@ getGenerate' = (generate' $$$ false') $$$ (TE strat)
         false' :: TypedExpr Bool
         false' = "False"
 
-doUniv' :: [Equation] -> Sig -> TypedExpr _
+doUniv' :: [Equation] -> Sig -> TypedExpr [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
 doUniv' eqs s = getUniv' $$$ getClasses' eqs
 
 getUniv' = concatMap' $$$ f

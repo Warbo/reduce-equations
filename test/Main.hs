@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings, PartialTypeSignatures #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings, PartialTypeSignatures, ScopedTypeVariables #-}
 
 module Main where
 
@@ -23,7 +23,7 @@ import qualified Test.QuickSpec.Term
 import Math.Equation.Reduce
 import Math.Equation.Internal
 
-main = defaultMain $ testGroup "All tests" [{-
+main = defaultMain $ testGroup "All tests" [
     testProperty "Can parse example equations"  canParseExamples
   , testProperty "Can evaluate equations"       canEvalExamples
   , testProperty "Can make signature"           canMakeSignature
@@ -43,16 +43,18 @@ main = defaultMain $ testGroup "All tests" [{-
   , testProperty "Terms appear in one class"    classesHaveNoDupes
   , testProperty "Class elements are equal"     classElementsAreEqual
   , testProperty "Non-equal elements separate"  nonEqualElementsSeparate
+  , testProperty "Classes have one arity"       classHasSameArity
   , testProperty "Can get classes from sig"     canGetClassesFromEqs
   , testProperty "Can get universe from sig"    canGetUnivFromSig
   , testProperty "Can get context from sig"     canGetCxtFromSig
   , testProperty "Can get sig from equations"   canGetSigFromEqs
   , testProperty "Sig has equation variables"   eqSigHasVars
   , testProperty "Sig has equation constants"   eqSigHasConsts
+  , testProperty "Equations have one arity"     equationsHaveSameArity
   , testProperty "Can render equations"         canRenderEqs
   , testProperty "Can prune equations"          canPruneEqs
-  , testProperty "Expression types match up" checkEvalTypes
-  , -} testProperty "Can get type of terms"     canGetTermType
+  , testProperty "Expression types match up"    checkEvalTypes
+  , testProperty "Can get type of terms"        canGetTermType
   ]
 
 -- Tests
@@ -81,10 +83,13 @@ sigsRender = testEval mkExpr (== Just "True")
 sigsHaveConsts = testEval mkExpr (== Just "True")
   where mkExpr (s, cs) = let e            = show' $$$ (hasConsts $$$ render s')
                              s'           = withConsts cs s
+
                              hasConsts :: TypedExpr (QSSig -> Bool)
                              hasConsts    = compose' checkConsts' constantSymbols'
+
                              checkConsts' :: TypedExpr ([Test.QuickSpec.Term.Symbol] -> Bool)
                              checkConsts' = checkNames' names
+
                              names        = map constName cs
                              dbg          = ("names",  names)
                           in (e, dbg)
@@ -99,7 +104,7 @@ sigsHaveVars = testEval mkExpr (== Just "True")
                              dbg        = ("names", names)
                           in (e, dbg)
 
-sigConstsUniqueIndices = once sigConstsUniqueIndices'
+sigConstsUniqueIndices = doOnce sigConstsUniqueIndices'
 
 -- Use `c` to generate a bunch of similar constants `consts`, add them to `s` to
 -- get `sig`. Render `sig` to a QuickSpec signature, then print out its constant
@@ -116,7 +121,7 @@ sigConstsUniqueIndices' s (Const a (Name n') t) = testEval mkExpr hasConsts
         consts = [Const a (Name (n ++ show i)) t | i <- [0..10]]
         sig    = withConsts consts s
 
-sigVarsUniqueIndices = once sigVarsUniqueIndices'
+sigVarsUniqueIndices = doOnce sigVarsUniqueIndices'
 
 -- Use `v` to generate a bunch of `Var`s of the same type, `vars`, add them to
 -- `s` to get `sig`. Render `sig` to a QuickSpec signature, then print out its
@@ -146,16 +151,27 @@ classesHaveTerms eqs = found `all` terms
         found t          = (t `elem`) `any` classes
         classes          = classesFromEqs eqs
 
-eqPartsAppearInSameClass eqs = all eqPartsInSameClass eqs
-  where classes                     = classesFromEqs eqs
+eqPartsAppearInSameClass eqs = counterexample (show debug) test
+  where test                        = all eqPartsInSameClass eqs
+        classes                     = classesFromEqs eqs
         matchingClass t             = head $ filter (t `elem`) classes
         eqPartsInSameClass (Eq l r) = r `elem` (matchingClass l) &&
                                       l `elem` (matchingClass r)
+        debug                       = (("eqs", eqs), ("classes", classes))
 
-classesHaveNoDupes eqs = all appearOnce terms
-  where classes      = classesFromEqs eqs
+classesHaveNoDupes eqs = counterexample (show debug) test
+  where test         = all appearOnce terms
+        classes      = classesFromEqs eqs
         terms        = concat classes
         appearOnce t = length (filter (t `elem`) classes) == 1
+        debug        = (("eqs", eqs), ("classes", classes), ("terms", terms))
+
+classHasSameArity eqs = all oneArity classes
+  where classes     = classesFromEqs eqs
+        oneArity ts = length (nub (map termArity ts)) == 1
+
+equationsHaveSameArity (eqs :: [Equation]) = all sameArity eqs
+  where sameArity (Eq l r) = termArity l == termArity r
 
 nonEqualElementsSeparate t v = match classes expected && match expected classes
   where (a:b:c:d:e:f:_) = map extend [0..]
@@ -172,8 +188,7 @@ nonEqualElementsSeparate t v = match classes expected && match expected classes
         match    []  ys = True
         match (x:xs) ys = any (setEq x) ys && match xs ys
 
-classElementsAreEqual :: [Equation] -> _
-classElementsAreEqual eqs = all elementsAreEqual classes
+classElementsAreEqual (eqs :: [Equation]) = all elementsAreEqual classes
   where classes :: [[Term]]
         classes              = classesFromEqs eqs
 
@@ -205,37 +220,10 @@ canFindClosure t v = all match expected
                     (e, [e]),
                     (f, fgh), (g, fgh), (h, fgh)]
 
--- | The list of all terms equal to `x`, according to `eqs`
-eqClosure :: [Equation] -> Term -> Seq.Seq Term
-eqClosure eqs x = indirect eqs Seq.empty (directEq eqs x)
-
-indirect :: [Equation] -> Seq.Seq Term -> Seq.Seq Term -> Seq.Seq Term
-indirect eqs seen xs | null xs   = seen
-indirect eqs seen xs | otherwise = indirect eqs (nub' $ seen Seq.>< unseen) unseen
-  where new       = xs >>= directEq eqs
-        unseen    = nub' $ Seq.filter notSeen new
-        notSeen a = not (a `isElem` seen)
-
-nub' = foldl f Seq.empty
-  where f acc x = if x `isElem` acc
-                     then acc
-                     else x Seq.<| acc
-
-isElem x xs = isJust (Seq.elemIndexL x xs)
-
--- | The list of terms equal to `x` by definition, according to `eqs`
-directEq :: [Equation] -> Term -> Seq.Seq Term
-directEq eqs x = x Seq.<| Seq.filter direct terms
-  where terms            = Seq.fromList . nub . concatMap termsOf $ eqs
-        termsOf (Eq a b) = [a, b]
-        direct a         = Eq x a `elem` eqs || Eq a x `elem` eqs
-
-canGetClassesFromEqs :: [Equation] -> _
-canGetClassesFromEqs eqs = True
+canGetClassesFromEqs (eqs :: [Equation]) = True
   where typeCheck = classesFromEqs eqs
 
-canGetUnivFromSig :: [Equation] -> _
-canGetUnivFromSig eqs = testExec mkExpr endsInTrue
+canGetUnivFromSig (eqs :: [Equation]) = testExec mkExpr endsInTrue
   where mkExpr s = let e = doUniv' eqs s $>>$ putTrue
                     in (e, ())
 
@@ -266,15 +254,15 @@ eqSigHasConsts eqs = counterexample debug test
                           ("sigconsts", sigconsts),
                           ("eqconsts",  eqconsts))
 
-canRenderEqs = once . forAll (return <$> resize 3 arbitrary) $ canRenderEqs'
+canRenderEqs = doOnce canRenderEqs'
 
-canRenderEqs' :: [Equation] -> _
-canRenderEqs' eqs = testEval mkExpr haveEqs
-  where mkExpr () = (expr, debug)
+canRenderEqs' (eqs :: [Equation]) = testEval mkExpr haveEqs
+  where mkExpr () = (indent expr, debug)
         expr      = unlines' $$$ shownEqs'
         sig'      = render (sigFromEqs eqs)
         shownEqs' = (map' $$$ (showEquation' $$$ sig')) $$$ eqs'
-        eqs'      = prune eqs
+        eqs'      = unSomePrune sig' clss
+        clss      = unSomeClasses eqs
         debug     = (("eqs",  eqs),
                      ("sig'", sig'),
                      ("eqs'", eqs'))
@@ -287,12 +275,16 @@ canRenderEqs' eqs = testEval mkExpr haveEqs
         keep ('D':'e':'p':'t':'h':_) = False
         keep _ = True
         haveEqs Nothing  = error "Failed to eval"
-        haveEqs (Just s) = setEq (map lToEq (filter keep (lines s)))
-                                 eqs
+        haveEqs (Just s) = unsafePerformIO $ do
+          print ("Got output: " ++ s)
+          return $ setEq (map lToEq (lines s)) -- (filter keep (lines s)))
+                         eqs
 
 -- | Check whether we can convince the type-checker that various expressions
 --   have the types we think they do
-checkEvalTypes = once . monadicIO . checkTypes $ exprs
+checkEvalTypes = doOnce checkEvalTypes'
+
+checkEvalTypes' term = monadicIO . checkTypes $ exprs
   where checkTypes [] = return ()
         checkTypes ((e, t, ms):es) = do
           out <- run . exec $ mkExpr ms (e `withType` t)
@@ -367,14 +359,15 @@ checkEvalTypes = once . monadicIO . checkTypes $ exprs
           (unType (map' $$$ univ2), "[Test.QuickSpec.Term.Expr Bool] -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
            []),
 
-          (unType (mkUniv2 ["undefined"]), "[Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
+          (unType (mkUniv2 [(cons' $$$ termToExpr term) $$$ nil']),
+           "[Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
            ["Test.QuickSpec.Term", "Test.QuickSpec.Utils.Typed"])
 
           ]
 
-canPruneEqs = once . forAll (return <$> resize 3 arbitrary) $ canPruneEqs'
+canPruneEqs = doOnce canPruneEqs'
 
-canPruneEqs' eqs = once $ monadicIO $ do
+canPruneEqs' eqs = monadicIO $ do
     out <- run $ eval expr
     monitor (counterexample (show (("eqs", eqs), ("expr", expr), ("out", out))))
     assert (expected out)
@@ -384,12 +377,19 @@ canPruneEqs' eqs = once $ monadicIO $ do
         pruned    = unSomePrune sig' clss
         clss      = unSomeClasses eqs
         sig'      = render (sigFromEqs eqs)
-        expected Nothing  = error "Got no output"
-        expected (Just o) = if all ((== 1) . length) (classesFromEqs eqs)
-                               then o == ""
-                               else case read o of
-                                         ("pruned", p) -> "==" `isInfixOf` (p :: String)
-                                         _             -> error ("Unexpected output: " ++ o)
+
+        unequal = all ((== 1) . length) (classesFromEqs eqs)
+
+        output :: Maybe String -> String
+        output (Just x) = case read x of
+          ("pruned", p) -> p
+          _             -> error ("Unexpected output: " ++ x)
+
+        expected x = case (x, eqs, unequal, output x) of
+          (Nothing, _ , _    , _) -> False
+          (_,       [], _    , p) -> p == ""  -- No output when no eqs
+          (_      , _ , True , p) -> p == ""  -- No output when unequal terms
+          (Just o , _ , False, p) -> "==" `isInfixOf` p
 
 canGetTermType (Type input) (Type output) = expected (termType term)
   where term  = App (C (Const undefined undefined func))
@@ -476,17 +476,48 @@ withExamples = forAll (elements exampleEqs)
 
 -- Random input generators
 
+termOfType (Type t) = termOfTypeArity 0 t
+
+termOfTypeArity a t = oneof [
+  C <$> (Const (Arity a) <$> arbitrary <*> return (Type t)),
+  V <$> (Var (Type t) <$> choose (0, 4) <*> return (Arity a)),
+  do Type arg <- arbitrary
+     r        <- termOfTypeArity 0     arg
+     l        <- termOfTypeArity (a+1) (concat ["(", arg, ") -> (", t, ")"])
+     return $ App l r]
+
 instance Arbitrary Equation where
-  arbitrary = Eq <$> arbitrary <*> arbitrary
-  shrink (Eq l r) = [Eq l' r' | (l', r') <- shrink (l, r)]
+  arbitrary = do Type t <- arbitrary
+                 l <- termOfType (Type t)
+                 r <- termOfType (Type t)
+                 return $ Eq l r
+
+  shrink (Eq l r) = [Eq l' r' | (l', r') <- shrink (l, r), termType' l' == termType' r']
 
 instance Arbitrary Term where
-  arbitrary = oneof [App <$> arbitrary <*> arbitrary,
-                     C   <$> arbitrary,
-                     V   <$> arbitrary]
-  shrink (C c)     = C <$> shrink c
-  shrink (V v)     = V <$> shrink v
-  shrink (App l r) = [l, r] ++ [App l' r' | (l', r') <- shrink (l, r)]
+  arbitrary = oneof [C <$> arbitrary, V <$> arbitrary,
+    do r         <- arbitrary
+       x         <- arbitrary
+       vc        <- arbitrary
+       Type retT <- arbitrary
+       i         <- choose (0, 4)
+       let Type argT = termType' r
+           funT      = "(" ++ argT ++ ") -> (" ++ retT ++ ")"
+           l         = if vc
+                          then C (Const (Arity 1) (constName x) (Type funT))
+                          else V (Var (Type funT) i (Arity 1))
+       return $ App l r]
+
+  shrink (C c)       = C <$> shrink c
+  shrink (V v)       = V <$> shrink v
+  shrink t@(App l r) = [C (Const (termArity t) (termName t) (termType' t))] ++
+                       [App l' r' | (l', r') <- shrink (l, r)]
+
+termName (C c)     = constName c
+termName (V v)     = Name (filter isAlpha (show (varType v) ++ show (varArity v)))
+termName (App l r) = let Name l' = termName l
+                         Name r' = termName r
+                      in Name ("app" ++ l' ++ r')
 
 instance Arbitrary Var where
   arbitrary = sized $ \n -> do
@@ -495,12 +526,19 @@ instance Arbitrary Var where
     index <- elements [0, 1, 2]
     return $ Var (Type typ) index (Arity arity)
 
+  shrink (Var t i a) = if i == 0
+                          then []
+                          else [Var t 0 a]
+
 instance Arbitrary Const where
   arbitrary = sized $ \n -> do
     arity <- elements [0..5]
-    name  <- listOf1 (arbitrary `suchThat` (`notElem` ("\n\r" :: String)))
+    name  <- arbitrary
     typ   <- naryType arity n
-    return $ Const (Arity arity) (Name name) (Type typ)
+    return $ Const (Arity arity) name (Type typ)
+
+  shrink (Const a n t) = do n' <- shrink n
+                            return (Const a n' t)
 
 instance Arbitrary Sig where
   arbitrary = Sig <$> listOf arbitrary <*> listOf arbitrary
@@ -509,6 +547,14 @@ instance Arbitrary Sig where
 
 instance Arbitrary Type where
   arbitrary = Type <$> sized sizedType
+
+instance Arbitrary Name where
+  arbitrary = Name <$> listOf1 (arbitrary `suchThat` isAlpha)
+
+  shrink (Name x) = let suffices = tail (tails x)
+                        nonEmpty = filter (not . null) suffices
+                        names    = map Name nonEmpty
+                     in reverse names -- Try shortest first
 
 sizedType :: Int -> Gen String
 sizedType 0 = elements ["Int", "Bool", "Float"]
@@ -530,3 +576,31 @@ naryType a n = do
 
 dbg :: (Show a, Monad m) => a -> PropertyM m ()
 dbg = monitor . counterexample . show
+
+doOnce :: (Show a, Arbitrary a, Testable prop) => (a -> prop) -> Property
+doOnce = once . forAll (resize 3 arbitrary)
+
+-- | The list of all terms equal to `x`, according to `eqs`
+eqClosure :: [Equation] -> Term -> Seq.Seq Term
+eqClosure eqs x = indirect eqs Seq.empty (directEq eqs x)
+
+indirect :: [Equation] -> Seq.Seq Term -> Seq.Seq Term -> Seq.Seq Term
+indirect eqs seen xs | null xs   = seen
+indirect eqs seen xs | otherwise = indirect eqs (nub' $ seen Seq.>< unseen) unseen
+  where new       = xs >>= directEq eqs
+        unseen    = nub' $ Seq.filter notSeen new
+        notSeen a = not (a `isElem` seen)
+
+nub' = foldl f Seq.empty
+  where f acc x = if x `isElem` acc
+                     then acc
+                     else x Seq.<| acc
+
+isElem x xs = isJust (Seq.elemIndexL x xs)
+
+-- | The list of terms equal to `x` by definition, according to `eqs`
+directEq :: [Equation] -> Term -> Seq.Seq Term
+directEq eqs x = x Seq.<| Seq.filter direct terms
+  where terms            = Seq.fromList . nub . concatMap termsOf $ eqs
+        termsOf (Eq a b) = [a, b]
+        direct a         = Eq x a `elem` eqs || Eq a x `elem` eqs
