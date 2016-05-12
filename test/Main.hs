@@ -44,6 +44,7 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Class elements are equal"     classElementsAreEqual
   , testProperty "Non-equal elements separate"  nonEqualElementsSeparate
   , testProperty "Classes have one arity"       classHasSameArity
+  , testProperty "Class length more than one"   classesNotSingletons
   , testProperty "Can get classes from sig"     canGetClassesFromEqs
   , testProperty "Can get universe from sig"    canGetUnivFromSig
   , testProperty "Can get context from sig"     canGetCxtFromSig
@@ -203,6 +204,10 @@ classElementsAreEqual (eqs :: [Equation]) = all elementsAreEqual classes
 
         equal :: Term -> Term -> Bool
         equal x y = y `isElem` eqClosure eqs x
+
+classesNotSingletons (eqs :: [Equation]) = all nonSingle classes
+  where nonSingle c = length c > 1
+        classes     = classesFromEqs eqs
 
 canFindClosure t v = all match expected
   where -- Generate unique terms by wrapping in "App c"
@@ -365,31 +370,17 @@ checkEvalTypes' term = monadicIO . checkTypes $ exprs
 
           ]
 
-canPruneEqs = doOnce canPruneEqs'
+canPruneEqs = canPruneEqs'
 
 canPruneEqs' eqs = monadicIO $ do
-    out <- run $ eval expr
-    monitor (counterexample (show (("eqs", eqs), ("expr", expr), ("out", out))))
+    out <- run $ pruneEqs' format eqs
+    monitor (counterexample (show (("eqs", eqs), ("out", out))))
     assert (expected out)
-  where TE expr   = indent allExpr
-        allExpr   = "show" $$$ ((pair' $$$ "\"pruned\"") $$$ (unlines' $$$ shownEqs'))
-        shownEqs' = (map' $$$ (showEquation' $$$ sig')) $$$ pruned
-        pruned    = unSomePrune sig' clss
-        clss      = unSomeClasses eqs
-        sig'      = render (sigFromEqs eqs)
-
-        unequal = all ((== 1) . length) (classesFromEqs eqs)
-
-        output :: Maybe String -> String
-        output (Just x) = case read x of
-          ("pruned", p) -> p
-          _             -> error ("Unexpected output: " ++ x)
-
-        expected x = case (x, eqs, unequal, output x) of
-          (Nothing, _ , _    , _) -> False
-          (_,       [], _    , p) -> p == ""  -- No output when no eqs
-          (_      , _ , True , p) -> p == ""  -- No output when unequal terms
-          (Just o , _ , False, p) -> "==" `isInfixOf` p
+  where format pruned = showEqsOnLines eqs (indent pruned)
+        expected Nothing  = False
+        expected (Just x) = case eqs of
+                                 [] -> x == ""  -- No output when no eqs
+                                 _  -> "==" `isInfixOf` (x :: String)
 
 canGetTermType (Type input) (Type output) = expected (termType term)
   where term  = App (C (Const undefined undefined func))
@@ -490,9 +481,17 @@ instance Arbitrary Equation where
   arbitrary = do Type t <- arbitrary
                  l <- termOfType (Type t)
                  r <- termOfType (Type t)
-                 return $ Eq l r
+                 if trivial l && trivial r || l == r
+                    then discard
+                    else return $ Eq l r
 
-  shrink (Eq l r) = [Eq l' r' | (l', r') <- shrink (l, r), termType' l' == termType' r']
+  shrink (Eq l r) = [Eq l' r' | (l', r') <- shrink (l, r),
+                     termType' l' == termType' r',
+                     not (trivial l' && trivial r')]
+
+trivial (C _) = True
+trivial (V _) = True
+trivial _     = False
 
 instance Arbitrary Term where
   arbitrary = oneof [C <$> arbitrary, V <$> arbitrary,

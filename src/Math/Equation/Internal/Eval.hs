@@ -566,3 +566,17 @@ unType (TE e) = TE e
 
 withMods' :: [Mod] -> TypedExpr a -> TypedExpr a
 withMods' ms (TE e) = TE (withMods ms (withQS e))
+
+pruneEqs :: [Equation] -> IO (Maybe String)
+pruneEqs eqs = pruneEqs' (showEqsOnLines eqs) eqs
+
+showEqsOnLines eqs pruned = unlines' $$$ shown'
+  where sig'   = render (sigFromEqs eqs)
+        shown' = (map' $$$ (showEquation' $$$ sig')) $$$ pruned
+
+pruneEqs' :: (TypedExpr [Test.QuickSpec.Equation.Equation] -> TypedExpr String) -> [Equation] -> IO (Maybe String)
+pruneEqs' f eqs = exec main'
+  where pruned    = unSomePrune sig' clss
+        sig'      = render (sigFromEqs eqs)
+        clss      = unSomeClasses eqs
+        main'     = "putStrLn" $$$ (f pruned)
