@@ -94,8 +94,10 @@ renderConsts (c:cs) = mappend' (renderConst c) (renderConsts cs)
 renderConst :: Const -> TypedExpr QSSig
 renderConst c = (f $$$ name) $$$ v
   where f :: TypedExpr (String -> () -> QSSig)
-        f = TE . withQS . qualified "Test.QuickSpec.Signature" . raw $
-              "fun" ++ show a
+        f = if a > 5
+               then error ("No fun* function for arity " ++ show a)
+               else TE . withQS . qualified "Test.QuickSpec.Signature" . raw $
+                      "fun" ++ show a
         v :: TypedExpr ()
         v = TE . raw $ "undefined :: (" ++ t ++ ")"
         Arity a = constArity c
@@ -242,7 +244,9 @@ empty' :: TypedExpr QSSig
 empty' = qsQual "Test.QuickSpec.Signature" "emptySig"
 
 gvars' :: Arity -> TypedExpr ([String] -> a -> QSSig)
-gvars' (Arity a) = qsQual "Test.QuickSpec.Signature" (raw ("gvars" ++ show a))
+gvars' (Arity a) = if a `elem` [0, 1, 2]
+                      then qsQual "Test.QuickSpec.Signature" (raw ("gvars" ++ show a))
+                      else error ("No gvars* function for arity " ++ show a)
 
 name' :: TypedExpr (Test.QuickSpec.Term.Symbol -> String)
 name' = qsQual "Test.QuickSpec.Term" "name"

@@ -171,7 +171,7 @@ classHasSameArity eqs = all oneArity classes
   where classes     = classesFromEqs eqs
         oneArity ts = length (nub (map termArity ts)) == 1
 
-equationsHaveSameArity (eqs :: [Equation]) = all sameArity eqs
+equationsHaveSameArity (Eqs eqs) = all sameArity eqs
   where sameArity (Eq l r) = termArity l == termArity r
 
 nonEqualElementsSeparate t v = match classes expected && match expected classes
@@ -189,7 +189,7 @@ nonEqualElementsSeparate t v = match classes expected && match expected classes
         match    []  ys = True
         match (x:xs) ys = any (setEq x) ys && match xs ys
 
-classElementsAreEqual (eqs :: [Equation]) = all elementsAreEqual classes
+classElementsAreEqual (Eqs eqs) = all elementsAreEqual classes
   where classes :: [[Term]]
         classes              = classesFromEqs eqs
 
@@ -205,7 +205,7 @@ classElementsAreEqual (eqs :: [Equation]) = all elementsAreEqual classes
         equal :: Term -> Term -> Bool
         equal x y = y `isElem` eqClosure eqs x
 
-classesNotSingletons (eqs :: [Equation]) = all nonSingle classes
+classesNotSingletons (Eqs eqs) = all nonSingle classes
   where nonSingle c = length c > 1
         classes     = classesFromEqs eqs
 
@@ -225,10 +225,10 @@ canFindClosure t v = all match expected
                     (e, [e]),
                     (f, fgh), (g, fgh), (h, fgh)]
 
-canGetClassesFromEqs (eqs :: [Equation]) = True
+canGetClassesFromEqs (Eqs eqs) = True
   where typeCheck = classesFromEqs eqs
 
-canGetUnivFromSig (eqs :: [Equation]) = testExec mkExpr endsInTrue
+canGetUnivFromSig (Eqs eqs) = testExec mkExpr endsInTrue
   where mkExpr s = let e = doUniv' eqs s $>>$ putTrue
                     in (e, ())
 
@@ -261,7 +261,7 @@ eqSigHasConsts eqs = counterexample debug test
 
 canRenderEqs = doOnce canRenderEqs'
 
-canRenderEqs' (eqs :: [Equation]) = testEval mkExpr haveEqs
+canRenderEqs' (Eqs eqs) = testEval mkExpr haveEqs
   where mkExpr () = (indent expr, debug)
         expr      = unlines' $$$ shownEqs'
         sig'      = render (sigFromEqs eqs)
@@ -470,18 +470,47 @@ withExamples = forAll (elements exampleEqs)
 termOfType (Type t) = termOfTypeArity 0 t
 
 termOfTypeArity a t = oneof [
-  C <$> (Const (Arity a) <$> arbitrary <*> return (Type t)),
-  V <$> (Var (Type t) <$> choose (0, 4) <*> return (Arity a)),
+  if a > 5
+     then discard
+     else C <$> (Const (Arity a) <$> arbitrary <*> return (Type t)),
+
+  -- We can only generate variables up to arity 2
+  if a > 2
+     then discard
+     else V <$> (Var (Type t) <$> choose (0, 4) <*> return (Arity a)),
   do Type arg <- arbitrary
      r        <- termOfTypeArity 0     arg
      l        <- termOfTypeArity (a+1) (concat ["(", arg, ") -> (", t, ")"])
      return $ App l r]
 
+newtype Equations = Eqs [Equation] deriving (Show, Eq)
+
+instance Arbitrary Equations where
+  shrink (Eqs [])  = []
+  shrink (Eqs eqs) = [Eqs eqs' | eqs' <- shrink eqs, consistentEqs eqs']
+
+  arbitrary = do
+      eqs  <- arbitrary
+      eqs' <- renameEqs eqs
+      return (Eqs eqs')
+
+-- | Keep renaming constants until each name only refers to one type
+renameEqs eqs = if consistentEqs eqs
+                   then return eqs
+                   else mapM renameEq eqs >>= renameEqs
+  where renameEq (Eq l r) = Eq <$> renameTerm l <*> renameTerm r
+        renameTerm (C (Const a _ t)) = C <$> (Const a <$> arbitrary <*> pure t)
+        renameTerm (V v)             = pure (V c)
+        renameTerm (App l r)         = App <$> renameTerm l <*> renameTerm r
+
+consistentEqs eqs = let nts = concatMap eqNames eqs
+                     in consistentNames nts
+
 instance Arbitrary Equation where
   arbitrary = do Type t <- arbitrary
                  l <- termOfType (Type t)
                  r <- termOfType (Type t)
-                 if trivial l && trivial r || l == r
+                 if trivial l && trivial r || l == r || allVar l || allVar r
                     then discard
                     else return $ Eq l r
 
@@ -489,9 +518,36 @@ instance Arbitrary Equation where
                      termType' l' == termType' r',
                      not (trivial l' && trivial r')]
 
-trivial (C _) = True
-trivial (V _) = True
-trivial _     = False
+-- "Trivial" equations will be pruned, so we need to avoid generating (or
+-- shrinking down to) equations where both sides only have one symbol, or which
+-- don't contain any variables
+trivial (C _)              = True
+trivial (V _)              = True
+trivial x | not (hasVar x) = True
+trivial x | allVar x       = True
+
+hasVar (V _)     = True
+hasVar (C _)     = False
+hasVar (App l r) = hasVar l || hasVar r
+
+allVar (V _) = True
+allVar (C _) = True
+allVar (App l r) = allVar l && allVar r
+
+-- | Make sure no name is used for constants of two types
+termNames :: Term -> [(Name, Type)]
+termNames (C (Const _ n t)) = [(n, t)]
+termNames (V _)             = []
+termNames (App l r)         = nub (termNames l ++ termNames r)
+
+eqNames :: Equation -> [(Name, Type)]
+eqNames (Eq l r) = termNames l ++ termNames r
+
+consistentNames nts = all hasOneType names
+  where names        = map fst nts
+        hasOneType n = length (typesOf n) == 1
+        typesOf    n = nub (map snd (entriesOf n))
+        entriesOf  n = filter ((== n) . fst) nts
 
 instance Arbitrary Term where
   arbitrary = oneof [C <$> arbitrary, V <$> arbitrary,
