@@ -496,57 +496,88 @@ instance Arbitrary Equation where
                      termType' l' == termType' r',
                      not (trivial l' && trivial r')]
 
+-- | Generate a "non-trivial" Term, i.e. containing at least one App, one Const
+--   and one Var, with the given Type
 termOfType :: Type -> Gen Term
-termOfType (Type t) = appOfTypeArity 0 t >>= giveVar >>= giveConst
+termOfType t = do
+  -- Generate a random Term of the correct type, of the form `App l r`
+  term <- appOfTypeArity 0 t
+  -- Force one branch to contain a Var and the other to contain a Const
+  giveVarConst term
 
+-- | Force one branch of an `App` to contain a Const and the other to contain a
+--   Var
+giveVarConst (App l r) = do
+  which <- arbitrary
+  l'    <- if     which then giveVar l else giveConst l
+  r'    <- if not which then giveVar r else giveConst r
+  return (App l' r')
+
+-- | Randomly replace part of the given Term with a Var
 giveVar :: Term -> Gen Term
+
+-- If the Term is already a Var, there is no work to do
 giveVar (V v) = return (V v)
-giveVar (C c) = do
-  i <- choose (0, 4)
-  return $ V (Var (constType c) i (constArity c))
+
+-- Turn Consts into Vars. Since Consts may have higher arity (up to 5) than Vars
+-- (up to 2), we rely on the App cases to prevent hitting high-arity Terms
+giveVar (C c) = V <$> varOfTypeArity (constArity c) (constType  c)
+
+-- Don't recurse any further if we reach an arity of 2, since we might reach a
+-- sub-Term with an arity above 2, which cannot be turned into a Var
+giveVar t | termArity t >= 2 = V <$> varOfTypeArity (termArity  t)
+                                                    (termType'  t)
+
+-- If it's safe to recurse, choose a branch at random to force a Var into
 giveVar (App l r) = do
   which <- arbitrary
-  l'    <- if which
-              then giveVar l
-              else return  l
-  r'    <- if which
-              then return  r
-              else giveVar r
+  l'    <- if     which then giveVar l else return l
+  r'    <- if not which then giveVar r else return r
   return (App l' r')
 
+-- | Randomly replace part of a Term with a Const
 giveConst :: Term -> Gen Term
+
+-- Constants can just be returned as-is
 giveConst (C c) = return (C c)
-giveConst (V v) = do
-  n <- arbitrary
-  return $ C (Const (varArity v) n (varType v))
+
+-- Variable arity should always be lower than 3, which a Const should have no
+-- problem with
+giveConst (V v) = C <$> constOfTypeArity (varArity v) (varType v)
+
+-- Don't recurse into Terms with arity 5, since we might hit a Term with a
+-- higher arity which we can't replace with a Const
+giveConst t | termArity t >= 5 = C <$> constOfTypeArity (termArity t)
+                                                        (termType' t)
+
+-- It's safe to recurse into low-arity Apps. We pick a branch randomly to put a
+-- Const into
 giveConst (App l r) = do
   which <- arbitrary
-  l'    <- if which
-              then giveConst l
-              else return    l
-  r'    <- if which
-              then return    r
-              else giveConst r
+  l'    <- if     which then giveConst l else return l
+  r'    <- if not which then giveConst r else return r
   return (App l' r')
 
-constOfTypeArity :: Int -> String -> Gen Const
-constOfTypeArity a t = Const (Arity a) <$> arbitrary
-                                       <*> pure (Type t)
+constOfTypeArity :: Arity -> Type -> Gen Const
+constOfTypeArity a t = if a > 5
+  then error ("Can't make Const of type " ++ show t ++ " and arity " ++ show a)
+  else Const a <$> arbitrary <*> pure t
 
-varOfTypeArity :: Int -> String -> Gen Var
-varOfTypeArity a t = Var (Type t) <$> choose (0, 4)
-                                  <*> pure (Arity a)
+varOfTypeArity :: Arity -> Type -> Gen Var
+varOfTypeArity a t = if a > 2
+  then error ("Can't make Var of type " ++ show t ++ " and arity " ++ show a)
+  else Var t <$> choose (0, 4) <*> pure a
 
-appOfTypeArity :: Int -> String -> Gen Term
-appOfTypeArity a t = do
+appOfTypeArity :: Arity -> Type -> Gen Term
+appOfTypeArity a (Type t) = do
   Type arg <- arbitrary
-  r        <- termOfTypeArity 0 arg
-  l        <- termOfTypeArity (a+1) (concat ["(", arg, ")",
-                                             " -> ",
-                                             "(", t,   ")"])
+  r        <- termOfTypeArity 0 (Type arg)
+  l        <- termOfTypeArity (a+1) (Type (concat ["(", arg, ")",
+                                                   " -> ",
+                                                   "(", t,   ")"]))
   return $ App l r
 
-termOfTypeArity :: Int -> String -> Gen Term
+termOfTypeArity :: Arity -> Type -> Gen Term
 termOfTypeArity a t = oneof (mkConst ++ mkVar ++ mkApp)
   where -- We can only generate constants up to arity 5
         mkConst = if a > 5
@@ -565,11 +596,15 @@ termOfTypeArity a t = oneof (mkConst ++ mkVar ++ mkApp)
 -- "Trivial" equations will be pruned, so we need to avoid generating (or
 -- shrinking down to) equations where both sides only have one symbol, or which
 -- don't contain any variables
-trivial (C _)              = True
-trivial (V _)              = True
-trivial x | not (hasVar x) = True
-trivial x | allVar x       = True
-trivial x                  = False
+trivial (C _)                = True
+trivial (V _)                = True
+trivial x | not (hasVar   x) = True
+trivial x | not (hasConst x) = True
+trivial x                    = False
+
+hasConst (V _)     = False
+hasConst (C _)     = True
+hasConst (App l r) = hasConst l || hasConst r
 
 hasVar (V _)     = True
 hasVar (C _)     = False
