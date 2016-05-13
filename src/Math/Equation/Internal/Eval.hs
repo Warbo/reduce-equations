@@ -65,24 +65,44 @@ exec (TE x) = eval' ("main = " ++) x
 
 -- Conversion from our representations to QuickSpec expressions
 
-renderEqs :: [Equation] -> TypedExpr [Test.QuickSpec.Equation.Equation]
-renderEqs []     = nil'
-renderEqs (e:es) = (cons' $$$ renderEq e) $$$ renderEqs es
+renderEqs :: [Equation] -> WithSig [Test.QuickSpec.Equation.Equation]
+renderEqs []     = WS nil'
+renderEqs (e:es) = case (renderEq e, renderEqs es) of
+                        (WS x, WS xs) -> WS ((cons' $$$ x) $$$ xs)
 
-renderEq :: Equation -> TypedExpr Test.QuickSpec.Equation.Equation
-renderEq (Eq lhs rhs) = ("(:=:)" $$$ renderTerm lhs) $$$ renderTerm rhs
+renderEq :: Equation -> WithSig Test.QuickSpec.Equation.Equation
+renderEq (Eq lhs rhs) = case (renderTerm lhs, renderTerm rhs) of
+                             (WS l, WS r) -> WS (("(:=:)" $$$ l) $$$ r)
 
-renderTerm :: Term -> TypedExpr Test.QuickSpec.Term.Term
-renderTerm t = case t of
-    App lhs rhs -> (app  $$$ renderTerm lhs) $$$ renderTerm rhs
-    C   c       -> const $$$ (sigToSym $$$ renderConst c)
-    V   v       -> var   $$$ (sigToSym $$$ renderVar   v)
+renderTerm :: Term -> WithSig Test.QuickSpec.Term.Term
+renderTerm t = case (t, sigToSym t) of
+    (App lhs rhs, _   ) -> case (renderTerm lhs, renderTerm rhs) of
+                                (WS l, WS r) -> WS ((app $$$ l) $$$ r)
+    (C   c,       WS s) -> WS (const $$$ s)
+    (V   v,       WS s) -> WS (var   $$$ s)
   where app :: TypedExpr (Test.QuickSpec.Term.Term -> Test.QuickSpec.Term.Term -> Test.QuickSpec.Term.Term)
         app   = qsQual "Test.QuickSpec.Term" "App"
         const, var :: TypedExpr (Test.QuickSpec.Term.Symbol -> Test.QuickSpec.Term.Term)
         const = qsQual "Test.QuickSpec.Term" "Const"
         var   = qsQual "Test.QuickSpec.Term" "Var"
-        sigToSym = compose' head' symbols'
+
+newtype WithSig a = WS (TypedExpr a)
+
+renderWithSig :: WithSig a -> Sig -> TypedExpr a
+renderWithSig (WS (TE e)) sig = TE (e {
+      eExpr = "let { givenSig = (" ++ eExpr s ++ "); } in (" ++ eExpr e ++ ")"
+    })
+  where TE s = render sig
+
+sigToSym :: Term -> WithSig Test.QuickSpec.Term.Symbol
+sigToSym t = WS (head' $$$ filtered)
+  where pred     = tlam "x" (("==" $$$ ("name" $$$ "x")) $$$ name')
+        Name n   = case t of
+                        C c     -> constName c
+                        V v     -> varName   v
+                        App _ _ -> error ("Tried to get symbol for " ++ show t)
+        name'    = TE (asString n)
+        filtered = (filter' $$$ pred) $$$ (symbols' $$$ "givenSig")
 
 render :: Sig -> TypedExpr QSSig
 render (Sig cs vs) = mappend' (renderConsts cs) (renderVars vs)
@@ -314,33 +334,35 @@ conO' = qsQual "Test.QuickSpec.Utils.Typed" "O"
 
 -- Pruning algorithm adapted from Test.QuickSpec.quickSpec
 
-{-
-quickSpec :: Signature a => a -> IO ()
-quickSpec sig = do
-  r <- generate False (const partialGen) sig
-  let clss   = concatMap (some2 (map (Some . O) . classes)) (TypeMap.toList r)
-      univ   = concatMap (some2 (map (tagged term))) clss
-      reps   = map (some2 (tagged term . head)) clss
-      eqs    = equations clss
-      ctx    = initial (maxDepth sig) (symbols sig) univ
-      allEqs = map (some eraseEquation) eqs
-      pruned = prune ctx (filter (not . isUndefined) (map erase reps)) id allEqs
+checkNames' :: [Name] -> TypedExpr ([Test.QuickSpec.Term.Symbol] -> Bool)
+checkNames' ns = tlam "syms" body
+  where body       = (all' $$$ (isIn' $$$ syms)) $$$ names
 
-  forM_ pruned (\eq ->
-      printf "%s\n" (showEquation sig eq))
--}
+        names :: TypedExpr [String]
+        names      = TE . raw $ "[" ++ commaNames ++ "]"
+
+        commaNames = intercalate "," (map (show . (\(Name n) -> n)) ns)
+
+        syms :: TypedExpr [Test.QuickSpec.Term.Symbol]
+        syms = "syms"
+
+isIn' :: TypedExpr ([Test.QuickSpec.Term.Symbol] -> String -> Bool)
+isIn' = tlam "syms" (tlam "n" body)
+  where body = (any' $$$ f) $$$ syms
+        f    = compose' (eq $$$ n) name'
+
+        syms :: TypedExpr [Test.QuickSpec.Term.Symbol]
+        syms = "syms"
+
+        eq :: Eq a => TypedExpr (a -> a -> Bool)
+        eq = "(==)"
+
+        n :: TypedExpr String
+        n = "n"
 
 genOf' :: Type -> TypedExpr (Test.QuickCheck.Gen.Gen a)
 genOf' (Type t) = return' $$$ undef
   where undef = TE . raw $ "undefined :: (" ++ t ++ ")"
-
-{-
-getClasses' :: TypedExpr (Test.QuickSpec.Utils.TypeMap.TypeMap (Test.QuickSpec.Utils.Typed.O Test.QuickSpec.TestTree.TestResults Test.QuickSpec.Term.Expr) -> Cls)
-getClasses' = compose' cm tmToList'
-  where cm  = concatMap' $$$ (some2' $$$ cls)
-        cls = compose' mp classes'
-        mp  = map' $$$ (compose' conSome' conO')
--}
 
 classesFromEqs :: [Equation] -> [[Term]]
 classesFromEqs = combine [] . map nub . addAllToClasses []
@@ -364,22 +386,20 @@ combine acc (c:cs) = case nub (overlaps c) of
         overlaps (t:ts) = classesWith t ++ overlaps ts
         without xs      = filter (`notElem` xs) (acc ++ cs)
 
-getClasses' :: [Equation] -> TypedExpr Cls
-getClasses' eqs = mkClasses classes
-  where classes = classesFromEqs eqs
-
-unSomeClasses :: [Equation] -> [TypedExpr [Test.QuickSpec.Term.Expr a]]
+unSomeClasses :: [Equation] -> [WithSig [Test.QuickSpec.Term.Expr a]]
 unSomeClasses eqs = map mkUnSomeClass (classesFromEqs eqs)
 
-mkUnSomeClass :: [Term] -> TypedExpr [Test.QuickSpec.Term.Expr a]
-mkUnSomeClass []     = nil'
-mkUnSomeClass (x:xs) = (cons' $$$ termToExpr x) $$$ mkUnSomeClass xs
+mkUnSomeClass :: [Term] -> WithSig [Test.QuickSpec.Term.Expr a]
+mkUnSomeClass []     = WS nil'
+mkUnSomeClass (x:xs) = case (termToExpr x, mkUnSomeClass xs) of
+                            (WS y, WS ys) -> WS ((cons' $$$ y) $$$ ys)
 
-unSomePrune :: TypedExpr QSSig -> [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Equation.Equation]
-unSomePrune sig clss = (((prune' $$$ arg1) $$$ arg2) $$$ id') $$$ arg3
-  where arg1 = ((initial' $$$ (maxDepth' $$$ sig)) $$$ (symbols' $$$ sig)) $$$ (mkUniv2 clss)
-        arg2 = (filter' $$$ (compose' not' isUndefined')) $$$ getTermHead clss
-        arg3 = sort' $$$ (mkEqs2 clss)
+unSomePrune :: [WithSig [Test.QuickSpec.Term.Expr a]] -> WithSig [Test.QuickSpec.Equation.Equation]
+unSomePrune clss = WS ((((prune' $$$ arg1) $$$ arg2) $$$ id') $$$ arg3)
+  where arg1  = ((initial' $$$ (maxDepth' $$$ "givenSig")) $$$ (symbols' $$$ "givenSig")) $$$ (mkUniv2 clss')
+        arg2  = (filter' $$$ (compose' not' isUndefined')) $$$ getTermHead clss'
+        arg3  = sort' $$$ (mkEqs2 clss')
+        clss' = map (\(WS x) -> x) clss
 
 mkUniv2 :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
 mkUniv2 []     = nil'
@@ -412,19 +432,9 @@ mkEqs2 (c:cs) = (append' $$$ (f $$$ c)) $$$ (mkEqs2 cs)
 sort' :: Ord a => TypedExpr ([a] -> [a])
 sort' = TE $ qualified "Data.List" "sort"
 
-mkClasses :: [[Term]] -> TypedExpr Cls
-mkClasses [] = nil'
-mkClasses (c:cs) = (cons' $$$ mkClass c) $$$ mkClasses cs
---mkClasses (c:cs) = (append' $$$ mkClass c) $$$ mkClasses cs
-
-mkClass :: [Term] -> TypedExpr (Test.QuickSpec.Utils.Typed.Some (Test.QuickSpec.Utils.Typed.O [] Test.QuickSpec.Term.Expr))
-mkClass ts = conSome' $$$ (conO' $$$ l ts)
-  where l    []  = nil'
-        l (x:xs) = (cons' $$$ termToExpr x) $$$ l xs
-
-termToExpr :: Term -> TypedExpr (Test.QuickSpec.Term.Expr a)
-termToExpr t = ((expr' $$$ term) $$$ arity) $$$ eval
-  where term  = renderTerm t
+termToExpr :: Term -> WithSig (Test.QuickSpec.Term.Expr a)
+termToExpr t = WS (((expr' $$$ term) $$$ arity) $$$ eval)
+  where WS term = renderTerm t
 
         arity :: TypedExpr Int
         arity = TE (raw (show (let Arity a = termArity t in a)))
@@ -437,130 +447,11 @@ termToExpr t = ((expr' $$$ term) $$$ arity) $$$ eval
                      Just (Type x) -> x
 
         expr' :: TypedExpr (_ -> Int -> _ -> Test.QuickSpec.Term.Expr _)
-        expr' = "Expr"
+        expr' = TE (qualified "Test.QuickSpec.Term" "Expr")
 
 
 append' :: TypedExpr ([a] -> [a] -> [a])
 append' = "(++)"
-
-doCtx' :: [Equation] -> Sig -> TypedExpr Ctx
-doCtx' eqs s = (getCtxSimple' $$$ render s) $$$ doUniv' eqs s
-
-getCtxSimple' :: TypedExpr (QSSig -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term] -> Ctx)
-getCtxSimple' = tlam "sig" body
-  where body = (initial' $$$ depth) $$$ syms
-        sig = "sig" :: TypedExpr QSSig
-        depth = maxDepth' $$$ sig
-        syms  = symbols' $$$ sig
-
-addUndefineds :: TypedExpr (QSSig -> QSSig)
-addUndefineds = tlam "sig" body
-  where body = mappend' sig (undefinedsSig' $$$ sig)
-        sig  = signature' $$$ sig'
-        sig' = "sig" :: TypedExpr QSSig
-
-getPruned' :: TypedExpr ((Ctx, Reps) -> Eqs -> Eqs)
-getPruned' = tlam "(ctx,reps)" body
-  where reps' = "reps" :: TypedExpr Reps
-        ctx'  = "ctx"  :: TypedExpr Ctx
-        body  = (((prune' $$$ ctx') $$$ reps) $$$ id')
-        reps  = (filter' $$$ pred) $$$ er
-
-        pred :: TypedExpr (Test.QuickSpec.Term.Term -> Bool)
-        pred = compose' not' isUndefined'
-
-        er   = (map' $$$ erase') $$$ reps'
-
---prune :: [Equation] -> IO (Maybe [Equation])
-prune eqs = tlam "sig" body $$$ render sig
-  where body    = (getPruned' $$$ ctxRep) $$$ eqs'
-        sig     = sigFromEqs eqs
-        eqs'    = renderEqs eqs
-        ctxRep  = getCtxRep eqs sig
-        classes = classesFromEqs eqs
-
-parseEqs = undefined
-
-getReps' :: TypedExpr ([Test.QuickSpec.Utils.Typed.Some (Test.QuickSpec.Utils.Typed.O [] Test.QuickSpec.Term.Expr)]
-                    -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term])
-getReps' = (map' $$$ f)
-  where f = some2' $$$ (compose' t head')
-        t = tagged' $$$ term'
-
-checkNames' :: [Name] -> TypedExpr ([Test.QuickSpec.Term.Symbol] -> Bool)
-checkNames' ns = tlam "syms" body
-  where body       = (all' $$$ (isIn' $$$ syms)) $$$ names
-
-        names :: TypedExpr [String]
-        names      = TE . raw $ "[" ++ commaNames ++ "]"
-
-        commaNames = intercalate "," (map (show . (\(Name n) -> n)) ns)
-
-        syms :: TypedExpr [Test.QuickSpec.Term.Symbol]
-        syms = "syms"
-
-isIn' :: TypedExpr ([Test.QuickSpec.Term.Symbol] -> String -> Bool)
-isIn' = tlam "syms" (tlam "n" body)
-  where body = (any' $$$ f) $$$ syms
-        f    = compose' (eq $$$ n) name'
-
-        syms :: TypedExpr [Test.QuickSpec.Term.Symbol]
-        syms = "syms"
-
-        eq :: Eq a => TypedExpr (a -> a -> Bool)
-        eq = "(==)"
-
-        n :: TypedExpr String
-        n = "n"
-
-doGenerate' :: Sig -> TypedExpr (IO (Test.QuickSpec.Utils.TypeMap.TypeMap (Test.QuickSpec.Utils.Typed.O Test.QuickSpec.TestTree.TestResults Test.QuickSpec.Term.Expr)))
-doGenerate' s = getGenerate' $$$ render s
-
--- We do a type-breaking wrap/unwrap here to use our `Strategy` type in place of
--- QuickSpec's, which is problematic to wrap up in a `TypedExpr`
-getGenerate' :: TypedExpr (QSSig -> IO (Test.QuickSpec.Utils.TypeMap.TypeMap (Test.QuickSpec.Utils.Typed.O Test.QuickSpec.TestTree.TestResults Test.QuickSpec.Term.Expr)))
-getGenerate' = (generate' $$$ false') $$$ (TE strat)
-  where TE strat = (const' $$$ partialGen')
-
-        false' :: TypedExpr Bool
-        false' = "False"
-
-doUniv' :: [Equation] -> Sig -> TypedExpr [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
-doUniv' eqs s = getUniv' $$$ getClasses' eqs
-
-getUniv' = concatMap' $$$ f
-  where f = some2' $$$ m
-        m = map' $$$ t
-        t = tagged' $$$ term'
-
-getCtxRep :: [Equation] -> Sig -> TypedExpr (Ctx, Reps)
-getCtxRep eqs s = func $$$ render s
-  where func :: TypedExpr (QSSig -> (Ctx, Reps))
-        func = tlam "sig" funcbody
-
-        funcbody :: TypedExpr (Ctx, Reps)
-        funcbody = f $$$ getClasses' eqs
-
-        f :: TypedExpr (Cls -> (Ctx, Reps))
-        f = tlam "cls" body
-
-        body :: TypedExpr (Ctx, Reps)
-        body = (pair' $$$ ctx) $$$ rep
-
-        ctx :: TypedExpr Ctx
-        ctx = (getCtxSimple' $$$ sig') $$$ u
-
-        u :: TypedExpr Univ
-        u = getUniv' $$$ cls'
-
-        rep :: TypedExpr Reps
-        rep = getReps' $$$ cls'
-
-        cls' :: TypedExpr Cls
-        cls' = "cls"
-
-        sig' :: TypedExpr QSSig
-        sig' = "sig"
 
 pair' :: TypedExpr (a -> b -> (a, b))
 pair' = "(,)"
@@ -572,15 +463,14 @@ withMods' :: [Mod] -> TypedExpr a -> TypedExpr a
 withMods' ms (TE e) = TE (withMods ms (withQS e))
 
 pruneEqs :: [Equation] -> IO (Maybe String)
-pruneEqs eqs = pruneEqs' (showEqsOnLines eqs) eqs
+pruneEqs eqs = pruneEqs' showEqsOnLines eqs
 
-showEqsOnLines eqs pruned = unlines' $$$ shown'
-  where sig'   = render (sigFromEqs eqs)
-        shown' = (map' $$$ (showEquation' $$$ sig')) $$$ pruned
+showEqsOnLines (WS pruned) = WS (unlines' $$$ shown')
+  where shown' = (map' $$$ (showEquation' $$$ "givenSig")) $$$ pruned
 
-pruneEqs' :: (TypedExpr [Test.QuickSpec.Equation.Equation] -> TypedExpr String) -> [Equation] -> IO (Maybe String)
+pruneEqs' :: (WithSig [Test.QuickSpec.Equation.Equation] -> WithSig String) -> [Equation] -> IO (Maybe String)
 pruneEqs' f eqs = exec main'
-  where pruned    = unSomePrune sig' clss
-        sig'      = render (sigFromEqs eqs)
+  where pruned    = unSomePrune clss
+        sig       = sigFromEqs eqs
         clss      = unSomeClasses eqs
-        main'     = "putStrLn" $$$ (f pruned)
+        main'     = "putStrLn" $$$ (renderWithSig (f pruned) sig)

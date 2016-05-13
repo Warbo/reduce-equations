@@ -35,7 +35,6 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Constants are distinct"       sigConstsUniqueIndices
   , testProperty "Variables are distinct"       sigVarsUniqueIndices
   , testProperty "Can find closure of term"     canFindClosure
-  , testProperty "Can generate terms from sig"  canGenerateFromSig
   , testProperty "No classes without equations" noClassesFromEmptyEqs
   , testProperty "Equation induces a class"     oneClassFromEq
   , testProperty "Classes contain given terms"  classesHaveTerms
@@ -46,8 +45,6 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Classes have one arity"       classHasSameArity
   , testProperty "Class length more than one"   classesNotSingletons
   , testProperty "Can get classes from sig"     canGetClassesFromEqs
-  , testProperty "Can get universe from sig"    canGetUnivFromSig
-  , testProperty "Can get context from sig"     canGetCxtFromSig
   , testProperty "Can get sig from equations"   canGetSigFromEqs
   , testProperty "Sig has equation variables"   eqSigHasVars
   , testProperty "Sig has equation constants"   eqSigHasConsts
@@ -56,6 +53,7 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Can prune equations"          canPruneEqs
   , testProperty "Expression types match up"    checkEvalTypes
   , testProperty "Can get type of terms"        canGetTermType
+  , testProperty "No trivial terms"             noTrivialTerms
   ]
 
 -- Tests
@@ -137,10 +135,6 @@ sigVarsUniqueIndices' s (Var t _ a) = testEval mkExpr hasVars
                                    (map varName (sigVars sig))
         vars = [Var t i a | i <- [0..10]]
         sig  = withVars vars s
-
-canGenerateFromSig = testExec mkExpr endsInTrue
-  where mkExpr s = let e = doGenerate' s >>$ putTrue
-                    in (e, ())
 
 noClassesFromEmptyEqs = null (classesFromEqs [])
 
@@ -228,14 +222,6 @@ canFindClosure t v = all match expected
 canGetClassesFromEqs (Eqs eqs) = True
   where typeCheck = classesFromEqs eqs
 
-canGetUnivFromSig (Eqs eqs) = testExec mkExpr endsInTrue
-  where mkExpr s = let e = doUniv' eqs s $>>$ putTrue
-                    in (e, ())
-
-canGetCxtFromSig eqs = testExec mkExpr endsInTrue
-  where mkExpr s = let e = doCtx' eqs s $>>$ putTrue
-                    in (e, ())
-
 canGetSigFromEqs eqs = case sigFromEqs eqs of
   Sig _ _ -> True
 
@@ -262,21 +248,21 @@ eqSigHasConsts eqs = counterexample debug test
 canRenderEqs = doOnce canRenderEqs'
 
 canRenderEqs' (Eqs eqs) = testEval mkExpr haveEqs
-  where mkExpr () = (indent expr, debug)
-        expr      = unlines' $$$ shownEqs'
-        sig'      = render (sigFromEqs eqs)
-        shownEqs' = (map' $$$ (showEquation' $$$ sig')) $$$ eqs'
-        eqs'      = unSomePrune sig' clss
-        clss      = unSomeClasses eqs
-        debug     = (("eqs",  eqs),
-                     ("sig'", sig'),
-                     ("eqs'", eqs'))
-        lToEq l   = unsafePerformIO $ do
-                      print ("GOT LINE: " ++ l)
-                      return (lToEq' l)
-        lToEq' l  = case eitherDecode' (S.fromString l) of
-                         Left  e  -> error e
-                         Right eq -> eq
+  where mkExpr ()    = (indent expr, debug)
+        expr         = renderWithSig (WS (unlines' $$$ shownEqs')) sig
+        sig          = sigFromEqs eqs
+        WS shownEqs' = WS ((map' $$$ (showEquation' $$$ "givenSig")) $$$ eqs')
+        WS eqs'      = unSomePrune clss
+        clss         = unSomeClasses eqs
+        debug        = (("eqs",  eqs),
+                        ("sig",  sig),
+                        ("eqs'", eqs'))
+        lToEq l      = unsafePerformIO $ do
+                         print ("GOT LINE: " ++ l)
+                         return (lToEq' l)
+        lToEq' l     = case eitherDecode' (S.fromString l) of
+                            Left  e  -> error e
+                            Right eq -> eq
         keep ('D':'e':'p':'t':'h':_) = False
         keep _ = True
         haveEqs Nothing  = error "Failed to eval"
@@ -364,7 +350,8 @@ checkEvalTypes' term = monadicIO . checkTypes $ exprs
           (unType (map' $$$ univ2), "[Test.QuickSpec.Term.Expr Bool] -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
            []),
 
-          (unType (mkUniv2 [(cons' $$$ termToExpr term) $$$ nil']),
+          (let WS e = termToExpr term
+            in unType (mkUniv2 [(cons' $$$ e) $$$ nil']),
            "[Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
            ["Test.QuickSpec.Term", "Test.QuickSpec.Utils.Typed"])
 
@@ -376,11 +363,11 @@ canPruneEqs' eqs = monadicIO $ do
     out <- run $ pruneEqs' format eqs
     monitor (counterexample (show (("eqs", eqs), ("out", out))))
     assert (expected out)
-  where format pruned = showEqsOnLines eqs (indent pruned)
-        expected Nothing  = False
-        expected (Just x) = case eqs of
-                                 [] -> x == ""  -- No output when no eqs
-                                 _  -> "==" `isInfixOf` (x :: String)
+  where format (WS pruned) = showEqsOnLines (WS (indent pruned))
+        expected Nothing   = False
+        expected (Just x)  = case eqs of
+                                  [] -> x == ""  -- No output when no eqs
+                                  _  -> "==" `isInfixOf` (x :: String)
 
 canGetTermType (Type input) (Type output) = expected (termType term)
   where term  = App (C (Const undefined undefined func))
@@ -388,6 +375,8 @@ canGetTermType (Type input) (Type output) = expected (termType term)
         func  = Type $ concat ["(", input, ") -> (", output, ")"]
         strip = filter (/= ' ')
         expected (Just (Type x)) = strip x === strip output
+
+noTrivialTerms t = forAll (termOfType t) (not . trivial)
 
 -- Helpers
 
@@ -467,22 +456,6 @@ withExamples = forAll (elements exampleEqs)
 
 -- Random input generators
 
-termOfType (Type t) = termOfTypeArity 0 t
-
-termOfTypeArity a t = oneof [
-  if a > 5
-     then discard
-     else C <$> (Const (Arity a) <$> arbitrary <*> return (Type t)),
-
-  -- We can only generate variables up to arity 2
-  if a > 2
-     then discard
-     else V <$> (Var (Type t) <$> choose (0, 4) <*> return (Arity a)),
-  do Type arg <- arbitrary
-     r        <- termOfTypeArity 0     arg
-     l        <- termOfTypeArity (a+1) (concat ["(", arg, ") -> (", t, ")"])
-     return $ App l r]
-
 newtype Equations = Eqs [Equation] deriving (Show, Eq)
 
 instance Arbitrary Equations where
@@ -500,7 +473,7 @@ renameEqs eqs = if consistentEqs eqs
                    else mapM renameEq eqs >>= renameEqs
   where renameEq (Eq l r) = Eq <$> renameTerm l <*> renameTerm r
         renameTerm (C (Const a _ t)) = C <$> (Const a <$> arbitrary <*> pure t)
-        renameTerm (V v)             = pure (V c)
+        renameTerm (V v)             = pure (V v)
         renameTerm (App l r)         = App <$> renameTerm l <*> renameTerm r
 
 consistentEqs eqs = let nts = concatMap eqNames eqs
@@ -518,6 +491,39 @@ instance Arbitrary Equation where
                      termType' l' == termType' r',
                      not (trivial l' && trivial r')]
 
+termOfType (Type t) = termOfTypeArity True True 0 t
+
+termOfTypeArity useVar useConst a t = oneof (mkConst ++ mkVar ++ mkApp)
+  where -- We can only generate variables up to arity 2
+        mkConst = if a > 5 || useVar
+                     then []
+                     else [C <$> (Const (Arity a) <$> arbitrary
+                                                  <*> pure (Type t))]
+
+        -- We can only generate variables up to arity 2
+        mkVar = if a > 2 || useConst
+                   then []
+                   else [V <$> (Var (Type t) <$> choose (0, 4)
+                                             <*> pure (Arity a))]
+
+        mkApp = if (useConst && a > 4) || (useVar && a > 1)
+                   then []
+                   else [do Type arg <- arbitrary
+                            which    <- arbitrary
+                            r        <- termOfTypeArity (useVar || which)
+                                                        False
+                                                        0
+                                                        arg
+                            l        <- termOfTypeArity False
+                                                        (useConst || which)
+                                                        (a+1)
+                                                        (concat [
+                                                          "(", arg, ")",
+                                                          " -> ",
+                                                          "(", t,   ")"
+                                                        ])
+                            return $ App l r]
+
 -- "Trivial" equations will be pruned, so we need to avoid generating (or
 -- shrinking down to) equations where both sides only have one symbol, or which
 -- don't contain any variables
@@ -525,13 +531,14 @@ trivial (C _)              = True
 trivial (V _)              = True
 trivial x | not (hasVar x) = True
 trivial x | allVar x       = True
+trivial x                  = False
 
 hasVar (V _)     = True
 hasVar (C _)     = False
 hasVar (App l r) = hasVar l || hasVar r
 
 allVar (V _) = True
-allVar (C _) = True
+allVar (C _) = False
 allVar (App l r) = allVar l && allVar r
 
 -- | Make sure no name is used for constants of two types
@@ -550,18 +557,9 @@ consistentNames nts = all hasOneType names
         entriesOf  n = filter ((== n) . fst) nts
 
 instance Arbitrary Term where
-  arbitrary = oneof [C <$> arbitrary, V <$> arbitrary,
-    do r         <- arbitrary
-       x         <- arbitrary
-       vc        <- arbitrary
-       Type retT <- arbitrary
-       i         <- choose (0, 4)
-       let Type argT = termType' r
-           funT      = "(" ++ argT ++ ") -> (" ++ retT ++ ")"
-           l         = if vc
-                          then C (Const (Arity 1) (constName x) (Type funT))
-                          else V (Var (Type funT) i (Arity 1))
-       return $ App l r]
+  arbitrary = do
+    t <- arbitrary
+    termOfType t
 
   shrink (C c)       = C <$> shrink c
   shrink (V v)       = V <$> shrink v
