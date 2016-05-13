@@ -122,6 +122,9 @@ instance Num Arity where
   abs (Arity a) = Arity (abs a)
   signum (Arity a) = Arity (signum a)
 
+instance Ord Arity where
+  Arity a <= Arity b = a <= b
+
 -- Sig construction
 
 emptySig :: Sig

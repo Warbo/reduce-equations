@@ -134,40 +134,36 @@ renderVars vs = collapse (map renderGroup (sameTypes vs))
   where collapse []        = empty'
         collapse (s:ss)    = mappend' s (collapse ss)
         renderGroup []     = empty'
-        renderGroup (v:vs) = renderTypedVars (varArity v) (varType v)
-                                             (map varName (v:vs))
+        renderGroup (v:vs) = if varArity v > 2
+                                then error ("Var arity too big: " ++ show (
+                                               ("varArity v", varArity v),
+                                               ("v", v)))
+                                else renderTypedVars (varArity v) (varType v)
+                                                     (map varName (v:vs))
         sameTypes []       = []
         sameTypes (v:vs)   = let (same, diff) = partition (sameType v) vs
                               in (v:same) : sameTypes diff
         sameType v1 v2     = varType v1 == varType v2
 
 renderTypedVars :: Arity -> Type -> [Name] -> TypedExpr QSSig
-renderTypedVars a t ns = ((gvars' a) $$$ names') $$$ genOf' t
-  where names' :: TypedExpr [String]
+renderTypedVars a t ns = (gvars $$$ names') $$$ genOf' t
+  where gvars = if a > 2
+                   then error ("Var arity too high: " ++ show (("a", a),
+                                                               ("t", t),
+                                                               ("ns", ns)))
+                   else gvars' a
+
+        names' :: TypedExpr [String]
         names' = collapse (map (\(Name n) -> TE (asString n)) ns)
+
         collapse :: [TypedExpr a] -> TypedExpr [a]
         collapse []     = nil'
         collapse (x:xs) = (cons' $$$ x) $$$ collapse xs
 
-renderVar :: Var -> TypedExpr QSSig
-renderVar v = (gv $$$ nameL) $$$ genOf' (varType v)
-  where gv = gvars' (varArity v)
-        Name  n = varName  v
-        nameL :: TypedExpr [String]
-        nameL = return' $$$ name
-        name :: TypedExpr String
-        name = TE (asString n)
-
 -- Wrappers for Prelude functions
-
-fmap' :: Functor f => TypedExpr ((a -> b) -> f a -> f b)
-fmap' = "fmap"
 
 map' :: TypedExpr ((a -> b) -> [a] -> [b])
 map' = "map"
-
-concatMap' :: TypedExpr ((a -> [b]) -> [a] -> [b])
-concatMap' = "concatMap"
 
 return' :: Monad m => TypedExpr (a -> m b)
 return' = "return"
@@ -190,30 +186,6 @@ show' = "show"
 all' :: TypedExpr ((a -> Bool) -> [a] -> Bool)
 all' = "all"
 
-(>>$) :: TypedExpr (IO a) -> TypedExpr (IO b) -> TypedExpr (IO b)
-a >>$ b = ("(>>)" $$$ a) $$$ b
-
-($>>$) :: TypedExpr a -> TypedExpr (IO b) -> TypedExpr (IO b)
-a $>>$ b = (return' $$$ a) >>$ b
-
-(>>=$) :: Monad m => TypedExpr (m a -> (a -> m b) -> m b)
-(>>=$) = "(>>=)"
-
-app' :: Applicative f => TypedExpr (f (a -> b) -> f a -> f b)
-app' = "(<*>)"
-
-($<$>$) :: Functor f => TypedExpr (a -> b) -> TypedExpr (f a) -> TypedExpr (f b)
-f $<$>$ x = (fmap' $$$ f) $$$ x
-
-($<*>$) :: Applicative f => TypedExpr (f (a -> b)) -> TypedExpr (f a) -> TypedExpr (f b)
-f $<*>$ x = (app' $$$ f) $$$ x
-
-($>>=$) :: Monad m => TypedExpr (m a) -> TypedExpr (a -> m b) -> TypedExpr (m b)
-x $>>=$ f = join' $$$ ((fmap' $$$ f) $$$ x)
-
-unsafePerformIO' :: TypedExpr (IO a -> a)
-unsafePerformIO' = TE . withMods ["System.IO.Unsafe"] $ "unsafePerformIO"
-
 join' :: Monad m => TypedExpr (m (m a) -> m a)
 join' = TE . withMods ["Control.Monad"] $ "join"
 
@@ -229,9 +201,6 @@ filter' = "filter"
 not' :: TypedExpr (Bool -> Bool)
 not' = "not"
 
-const' :: TypedExpr (a -> b -> a)
-const' = "const"
-
 compose' :: TypedExpr (b -> c) -> TypedExpr (a -> b) -> TypedExpr (a -> c)
 compose' f g = ("(.)" $$$ f) $$$ g
 
@@ -243,15 +212,6 @@ unlines' = "unlines"
 type QSSig = Test.QuickSpec.Signature.Sig
 
 type Ctx = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.Context
-
-type Reps = [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
-
-type Cls = [Test.QuickSpec.Utils.Typed.Some (Test.QuickSpec.Utils.Typed.O [] Test.QuickSpec.Term.Expr)]
-
-type Univ = [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
-
--- Used in place of Test.QuickSpec.Term.Strategy, to avoid impredicativity
-data Strategy where
 
 type Eqs = [Test.QuickSpec.Equation.Equation]
 
@@ -275,35 +235,8 @@ gvars' (Arity a) = if a `elem` [0, 1, 2]
 name' :: TypedExpr (Test.QuickSpec.Term.Symbol -> String)
 name' = qsQual "Test.QuickSpec.Term" "name"
 
-signature' :: TypedExpr (a -> QSSig)
-signature' = qsQual "Test.QuickSpec.Signature" "signature"
-
-tagged' :: TypedExpr ((f a -> b) -> f a -> Test.QuickSpec.Utils.Typed.Tagged b)
-tagged' = qsQual "Test.QuickSpec.Utils.Typed" "tagged"
-
 term' :: TypedExpr (Test.QuickSpec.Term.Expr a -> Test.QuickSpec.Term.Term)
 term' = qsQual "Test.QuickSpec.Term" "term"
-
-undefinedsSig' :: TypedExpr (QSSig -> QSSig)
-undefinedsSig' = qsQual "Test.QuickSpec.Signature" "undefinedsSig"
-
-generate' :: TypedExpr (Bool
-                     -> Strategy
-                     -> QSSig
-                     -> IO (Test.QuickSpec.Utils.TypeMap.TypeMap (Test.QuickSpec.Utils.Typed.O Test.QuickSpec.TestTree.TestResults Test.QuickSpec.Term.Expr)))
-generate' = qsQual "Test.QuickSpec.Generate" "generate"
-
-partialGen' :: TypedExpr (Test.QuickSpec.Term.PGen a -> Test.QuickCheck.Gen.Gen a)
-partialGen' = qsQual "Test.QuickSpec.Term" "partialGen"
-
-classes' :: TypedExpr (Test.QuickSpec.TestTree.TestResults a -> [[a]])
-classes' = qsQual "Test.QuickSpec.TestTree" "classes"
-
-tmToList' :: TypedExpr (Test.QuickSpec.Utils.TypeMap.TypeMap f -> [Test.QuickSpec.Utils.Typed.Some f])
-tmToList' = qsQual "Test.QuickSpec.Utils.TypeMap" "toList"
-
-some2' :: TypedExpr ((f (g a) -> b) -> Test.QuickSpec.Utils.Typed.Some (Test.QuickSpec.Utils.Typed.O f g) -> b)
-some2' = qsQual "Test.QuickSpec.Utils.Typed" "some2"
 
 initial' :: TypedExpr (Int
                   -> [Test.QuickSpec.Term.Symbol]
@@ -320,9 +253,6 @@ symbols' = qsQual "Test.QuickSpec.Signature" "symbols"
 
 isUndefined' = qsQual "Test.QuickSpec.Term" "isUndefined"
 
-erase' :: TypedExpr (Test.QuickSpec.Utils.Typed.Tagged a -> a)
-erase' = qsQual "Test.QuickSpec.Utils.Typed" "erase"
-
 prune' = qsQual "Test.QuickSpec.Main" "prune"
 
 showEquation' :: TypedExpr (Test.QuickSpec.Signature.Sig -> Test.QuickSpec.Equation.Equation -> String)
@@ -332,9 +262,6 @@ showEquation' = qsQual "Test.QuickSpec.Equation" "showEquation"
 
 conSome' :: TypedExpr (f a -> Test.QuickSpec.Utils.Typed.Some f)
 conSome' = qsQual "Test.QuickSpec.Utils.Typed" "Some"
-
-conO' :: TypedExpr (f (g a) -> Test.QuickSpec.Utils.Typed.O f g a)
-conO' = qsQual "Test.QuickSpec.Utils.Typed" "O"
 
 -- Pruning algorithm adapted from Test.QuickSpec.quickSpec
 
@@ -456,9 +383,6 @@ termToExpr t = WS (((expr' $$$ term) $$$ arity) $$$ eval)
 
 append' :: TypedExpr ([a] -> [a] -> [a])
 append' = "(++)"
-
-pair' :: TypedExpr (a -> b -> (a, b))
-pair' = "(,)"
 
 unType :: TypedExpr a -> TypedExpr b
 unType (TE e) = TE e
