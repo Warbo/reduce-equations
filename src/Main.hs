@@ -1,3 +1,6 @@
 module Main where
 
-main = error "Not implemented"
+import Math.Equation.Reduce
+import System.Environment
+
+main = getContents >>= parseAndReduce >>= putStrLn
