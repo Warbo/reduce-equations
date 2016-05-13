@@ -54,6 +54,7 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Expression types match up"    checkEvalTypes
   , testProperty "Can get type of terms"        canGetTermType
   , testProperty "No trivial terms"             noTrivialTerms
+  , testProperty "Equations are consistent"     eqsAreConsistent
   ]
 
 -- Tests
@@ -378,6 +379,8 @@ canGetTermType (Type input) (Type output) = expected (termType term)
 
 noTrivialTerms t = forAll (termOfType t) (not . trivial)
 
+eqsAreConsistent (Eqs eqs) = consistentEqs eqs
+
 -- Helpers
 
 setEq xs ys = all (`elem` xs) ys && all (`elem` ys) xs
@@ -491,38 +494,71 @@ instance Arbitrary Equation where
                      termType' l' == termType' r',
                      not (trivial l' && trivial r')]
 
-termOfType (Type t) = termOfTypeArity True True 0 t
+termOfType :: Type -> Gen Term
+termOfType (Type t) = appOfTypeArity 0 t >>= giveVar >>= giveConst
 
-termOfTypeArity useVar useConst a t = oneof (mkConst ++ mkVar ++ mkApp)
-  where -- We can only generate variables up to arity 2
-        mkConst = if a > 5 || useVar
-                     then []
-                     else [C <$> (Const (Arity a) <$> arbitrary
-                                                  <*> pure (Type t))]
+giveVar :: Term -> Gen Term
+giveVar (V v) = return (V v)
+giveVar (C c) = do
+  i <- choose (0, 4)
+  return $ V (Var (constType c) i (constArity c))
+giveVar (App l r) = do
+  which <- arbitrary
+  l'    <- if which
+              then giveVar l
+              else return  l
+  r'    <- if which
+              then return  r
+              else giveVar r
+  return (App l' r')
+
+giveConst :: Term -> Gen Term
+giveConst (C c) = return (C c)
+giveConst (V v) = do
+  n <- arbitrary
+  return $ C (Const (varArity v) n (varType v))
+giveConst (App l r) = do
+  which <- arbitrary
+  l'    <- if which
+              then giveConst l
+              else return    l
+  r'    <- if which
+              then return    r
+              else giveConst r
+  return (App l' r')
+
+constOfTypeArity :: Int -> String -> Gen Const
+constOfTypeArity a t = Const (Arity a) <$> arbitrary
+                                       <*> pure (Type t)
+
+varOfTypeArity :: Int -> String -> Gen Var
+varOfTypeArity a t = Var (Type t) <$> choose (0, 4)
+                                  <*> pure (Arity a)
+
+appOfTypeArity :: Int -> String -> Gen Term
+appOfTypeArity a t = do
+  Type arg <- arbitrary
+  r        <- termOfTypeArity 0 arg
+  l        <- termOfTypeArity (a+1) (concat ["(", arg, ")",
+                                             " -> ",
+                                             "(", t,   ")"])
+  return $ App l r
+
+termOfTypeArity :: Int -> String -> Gen Term
+termOfTypeArity a t = oneof (mkConst ++ mkVar ++ mkApp)
+  where -- We can only generate constants up to arity 5
+        mkConst = if a > 5
+                     then error ("Can't gen Term of arity " ++ show a)
+                     else [C <$> constOfTypeArity a t]
 
         -- We can only generate variables up to arity 2
-        mkVar = if a > 2 || useConst
+        mkVar = if a > 2
                    then []
-                   else [V <$> (Var (Type t) <$> choose (0, 4)
-                                             <*> pure (Arity a))]
+                   else [V <$> varOfTypeArity a t]
 
-        mkApp = if (useConst && a > 4) || (useVar && a > 1)
+        mkApp = if a > 4
                    then []
-                   else [do Type arg <- arbitrary
-                            which    <- arbitrary
-                            r        <- termOfTypeArity (useVar || which)
-                                                        False
-                                                        0
-                                                        arg
-                            l        <- termOfTypeArity False
-                                                        (useConst || which)
-                                                        (a+1)
-                                                        (concat [
-                                                          "(", arg, ")",
-                                                          " -> ",
-                                                          "(", t,   ")"
-                                                        ])
-                            return $ App l r]
+                   else [appOfTypeArity a t]
 
 -- "Trivial" equations will be pruned, so we need to avoid generating (or
 -- shrinking down to) equations where both sides only have one symbol, or which
