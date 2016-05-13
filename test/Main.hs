@@ -94,17 +94,17 @@ sigsHaveConsts = testEval mkExpr (== Just "True")
                              dbg          = ("names", names)
                           in (e, dbg)
 
-sigsHaveVars s vs = testEval mkExpr (== Just "True")
-  where mkExpr () = let e          = show' $$$ (hasVars $$$ render s')
-                        s'         = withVars vs s
+sigsHaveVars = testEval mkExpr (== Just "True")
+  where mkExpr (s, vs) = let e          = show' $$$ (hasVars $$$ render s')
+                             s'         = withVars vs s
 
-                        hasVars :: TypedExpr (QSSig -> Bool)
-                        hasVars    = compose' checkVars' variableSymbols'
+                             hasVars :: TypedExpr (QSSig -> Bool)
+                             hasVars    = compose' checkVars' variableSymbols'
 
-                        checkVars' = checkNames' names
-                        names      = map varName vs
-                        dbg        = ("names", names)
-                     in (e, dbg)
+                             checkVars' = checkNames' names
+                             names      = map varName vs
+                             dbg        = ("names", names)
+                          in (e, dbg)
 
 sigConstsUniqueIndices = doOnce sigConstsUniqueIndices'
 
@@ -417,7 +417,7 @@ testEval' :: (Arbitrary a, Show a, Show b) => (TypedExpr e -> IO (Maybe String))
                                             -> (Maybe String -> Bool)
                                             -> Property
 testEval' evl mkExpr expect = forAll (resize 10 arbitrary) go
-  where go arg = {-once $-} monadicIO $ do
+  where go arg = once $ monadicIO $ do
                    let (e, dbg) = mkExpr arg
                    result <- run (evl (indent e))
                    monitor . counterexample . show $ (("expr",   e),
