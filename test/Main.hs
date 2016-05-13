@@ -255,24 +255,12 @@ canRenderEqs' (Eqs eqs) = testEval mkExpr haveEqs
         expr         = renderWithSig (WS (unlines' $$$ shownEqs')) sig
         sig          = sigFromEqs eqs
         WS shownEqs' = WS ((map' $$$ (showEquation' $$$ "givenSig")) $$$ eqs')
-        WS eqs'      = unSomePrune clss
-        clss         = unSomeClasses eqs
+        WS eqs'      = renderEqs eqs
         debug        = (("eqs",  eqs),
                         ("sig",  sig),
                         ("eqs'", eqs'))
-        lToEq l      = unsafePerformIO $ do
-                         print ("GOT LINE: " ++ l)
-                         return (lToEq' l)
-        lToEq' l     = case eitherDecode' (S.fromString l) of
-                            Left  e  -> error e
-                            Right eq -> eq
-        keep ('D':'e':'p':'t':'h':_) = False
-        keep _ = True
         haveEqs Nothing  = error "Failed to eval"
-        haveEqs (Just s) = unsafePerformIO $ do
-          print ("Got output: " ++ s)
-          return $ setEq (map lToEq (lines s)) -- (filter keep (lines s)))
-                         eqs
+        haveEqs (Just s) = length (filter ("==" `isInfixOf`) (lines s)) == length eqs
 
 -- | Check whether we can convince the type-checker that various expressions
 --   have the types we think they do
@@ -353,28 +341,29 @@ checkEvalTypes' term = monadicIO . checkTypes $ exprs
           (unType (map' $$$ univ2), "[Test.QuickSpec.Term.Expr Bool] -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
            []),
 
-          (let WS e = termToExpr term
+          (let e = termToExpr term `renderWithSig` Sig [] []
             in unType (mkUniv2 [(cons' $$$ e) $$$ nil']),
            "[Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
            ["Test.QuickSpec.Term", "Test.QuickSpec.Utils.Typed"])
 
           ]
 
-canPruneEqs = canPruneEqs'
+canPruneEqs = doOnce canPruneEqs'
 
 canPruneEqs' (Eqs eqs) = monadicIO $ do
     out <- run $ pruneEqs' format eqs
     monitor (counterexample (show (("eqs", map quick eqs), ("out", out))))
     assert (expected out)
   where format (WS pruned) = showEqsOnLines (WS (indent pruned))
-        expected Nothing   = False
-        expected (Just x)  = case eqs of
-                                  [] -> x == ""  -- No output when no eqs
-                                  _  -> "==" `isInfixOf` (x :: String)
 
--- | Strip types, since they're very expensive to show
-quick (Eq l r) = Eq (q l) (q r)
-  where q (C c)       = C c
+        expected Nothing  = False
+        expected (Just x) = case eqs of
+                                 [] -> x == ""  -- No output when no eqs
+                                 _  -> "==" `isInfixOf` (x :: String)
+
+        -- | Strip types, since they're very expensive to show
+        quick (Eq l r) = Eq (q l) (q r)
+        q (C c)       = C c
         q (V v)       = V v
         q (App l r _) = App l r Nothing
 

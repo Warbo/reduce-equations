@@ -396,7 +396,7 @@ showEqsOnLines (WS pruned) = WS (unlines' $$$ shown')
 
 pruneEqs' :: (WithSig [Test.QuickSpec.Equation.Equation] -> WithSig String) -> [Equation] -> IO (Maybe String)
 pruneEqs' f eqs = exec main'
-  where pruned    = unSomePrune clss
-        sig       = sigFromEqs eqs
-        clss      = unSomeClasses eqs
-        main'     = "putStrLn" $$$ (renderWithSig (f pruned) sig)
+  where pruned = unSomePrune clss
+        sig    = sigFromEqs eqs
+        clss   = unSomeClasses eqs
+        main'  = "putStrLn" $$$ (renderWithSig (f pruned) sig)
