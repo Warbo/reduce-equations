@@ -130,12 +130,16 @@ renderConst c = (f $$$ name) $$$ v
 --   clobbering the same variable indices, so we add each type's variables in
 --   one go
 renderVars :: [Var] -> TypedExpr QSSig
-renderVars vs = collapse (map renderGroup (groupBy sameType vs))
-  where collapse []     = empty'
-        collapse (s:ss) = mappend' s (collapse ss)
-        renderGroup [] = empty'
-        renderGroup (v:vs) = renderTypedVars (varArity v) (varType v) (map varName (v:vs))
-        sameType v1 v2 = varType v1 == varType v2
+renderVars vs = collapse (map renderGroup (sameTypes vs))
+  where collapse []        = empty'
+        collapse (s:ss)    = mappend' s (collapse ss)
+        renderGroup []     = empty'
+        renderGroup (v:vs) = renderTypedVars (varArity v) (varType v)
+                                             (map varName (v:vs))
+        sameTypes []       = []
+        sameTypes (v:vs)   = let (same, diff) = partition (sameType v) vs
+                              in (v:same) : sameTypes diff
+        sameType v1 v2     = varType v1 == varType v2
 
 renderTypedVars :: Arity -> Type -> [Name] -> TypedExpr QSSig
 renderTypedVars a t ns = ((gvars' a) $$$ names') $$$ genOf' t
