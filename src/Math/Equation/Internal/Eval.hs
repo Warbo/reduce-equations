@@ -76,7 +76,7 @@ renderEq (Eq lhs rhs) = case (renderTerm lhs, renderTerm rhs) of
 
 renderTerm :: Term -> WithSig Test.QuickSpec.Term.Term
 renderTerm t = case (t, sigToSym t) of
-    (App lhs rhs, _   ) -> case (renderTerm lhs, renderTerm rhs) of
+    (App lhs rhs _, _ ) -> case (renderTerm lhs, renderTerm rhs) of
                                 (WS l, WS r) -> WS ((app $$$ l) $$$ r)
     (C   c,       WS s) -> WS (const $$$ s)
     (V   v,       WS s) -> WS (var   $$$ s)
@@ -98,9 +98,9 @@ sigToSym :: Term -> WithSig Test.QuickSpec.Term.Symbol
 sigToSym t = WS (head' $$$ filtered)
   where pred     = tlam "x" (("==" $$$ ("name" $$$ "x")) $$$ name')
         Name n   = case t of
-                        C c     -> constName c
-                        V v     -> varName   v
-                        App _ _ -> error ("Tried to get symbol for " ++ show t)
+                        C c       -> constName c
+                        V v       -> varName   v
+                        App _ _ _ -> error ("Tried to get symbol for " ++ show t)
         name'    = TE (asString n)
         filtered = (filter' $$$ pred) $$$ (symbols' $$$ "givenSig")
 
@@ -118,11 +118,14 @@ renderConst c = (f $$$ name) $$$ v
                then error ("No fun* function for arity " ++ show a)
                else TE . withQS . qualified "Test.QuickSpec.Signature" . raw $
                       "fun" ++ show a
+
         v :: TypedExpr ()
-        v = TE . raw $ "undefined :: (" ++ t ++ ")"
+        v = TE . raw $ "undefined :: (" ++ typeName t ++ ")"
+
         Arity a = constArity c
         Name  n = constName  c
-        Type  t = constType  c
+        t       = constType  c
+
         name :: TypedExpr String
         name = TE (asString n)
 
@@ -292,8 +295,8 @@ isIn' = tlam "syms" (tlam "n" body)
         n = "n"
 
 genOf' :: Type -> TypedExpr (Test.QuickCheck.Gen.Gen a)
-genOf' (Type t) = return' $$$ undef
-  where undef = TE . raw $ "undefined :: (" ++ t ++ ")"
+genOf' t = return' $$$ undef
+  where undef = TE . raw $ "undefined :: (" ++ typeName t ++ ")"
 
 classesFromEqs :: [Equation] -> [[Term]]
 classesFromEqs = combine [] . map nub . addAllToClasses []
@@ -371,15 +374,10 @@ termToExpr t = WS (((expr' $$$ term) $$$ arity) $$$ eval)
         arity = TE (raw (show (let Arity a = termArity t in a)))
 
         -- Used for variable instantiation (which we avoid) and specifying type
-        eval  = "undefined" `withType` ("Valuation -> (" ++ typ ++ ")")
-
-        typ   = case termType t of
-                     Nothing -> error ("Couldn't get type of " ++ show t)
-                     Just (Type x) -> x
+        eval  = "undefined" `withType` ("Valuation -> (" ++ typeName (termType' t) ++ ")")
 
         expr' :: TypedExpr (_ -> Int -> _ -> Test.QuickSpec.Term.Expr _)
         expr' = TE (qualified "Test.QuickSpec.Term" "Expr")
-
 
 append' :: TypedExpr ([a] -> [a] -> [a])
 append' = "(++)"

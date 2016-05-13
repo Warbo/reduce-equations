@@ -29,15 +29,26 @@ instance FromJSON Equation where
 instance Show Equation where
   show = toString . encode . toJSON
 
-data Term = App Term Term | C Const | V Var deriving (Show, Eq)
+data Term = App Term Term (Maybe Type) | C Const | V Var
+
+instance Eq Term where
+  (C c1)        == (C c2)        = c1 == c2
+  (V v1)        == (V v2)        = v1 == v2
+  (App l1 r1 _) == (App l2 r2 _) = l1 == l2 && r1 == r2
+  _             == _             = False
+
+instance Show Term where
+  show (C c)       = "C (" ++ show c ++ ")"
+  show (V v)       = "V (" ++ show v ++ ")"
+  show (App l r _) = "App (" ++ show l ++ ") (" ++ show r ++ ")"
 
 instance ToJSON Term where
   toJSON t = case t of
-    C c     -> toJSON c
-    V v     -> toJSON v
-    App l r -> object ["role" .= ("application" :: String),
-                       "lhs"  .= toJSON l,
-                       "rhs"  .= toJSON r]
+    C c       -> toJSON c
+    V v       -> toJSON v
+    App l r _ -> object ["role" .= ("application" :: String),
+                         "lhs"  .= toJSON l,
+                         "rhs"  .= toJSON r]
 
 instance FromJSON Term where
   parseJSON (Object v) = do
@@ -45,7 +56,7 @@ instance FromJSON Term where
     case (role :: String) of
          "variable"    -> V <$> parseJSON (Object v)
          "constant"    -> C <$> parseJSON (Object v)
-         "application" -> App <$> v .: "lhs" <*> v .: "rhs"
+         "application" -> app <$> v .: "lhs" <*> v .: "rhs"
   parseJSON _          = mzero
 
 data Sig = Sig [Const] [Var] deriving (Show)
@@ -68,10 +79,11 @@ instance FromJSON Var where
   parseJSON (Object v) = do
     t <- v .: "type"
     i <- v .: "id"
-    return (Var (Type t) i (Arity (countArity t)))
+    return (Var t i (Arity (countArity t)))
   parseJSON _          = mzero
 
-countArity t = doCount t "->"
+countArity (FunType i o) = 1 + countArity o
+countArity (RawType t)   = doCount t "->"
 
 doCount haystack needle = T.count (T.pack needle) (T.pack haystack)
 
@@ -87,13 +99,25 @@ instance FromJSON Const where
   parseJSON (Object v) = do
     t <- v .: "type"
     s <- v .: "symbol"
-    return (Const (Arity (countArity t)) s (Type t))
+    return (Const (Arity (countArity t)) s t)
   parseJSON _          = mzero
 
-data Type = Type String deriving (Show, Eq)
+data Type = RawType String | FunType Type Type deriving (Show, Eq)
 
 instance ToJSON Type where
-  toJSON (Type s) = toJSON s
+  toJSON (RawType s)   = object ["role" .= ("rawtype" :: String),
+                                 "type" .= toJSON s]
+  toJSON (FunType i o) = object ["role" .= ("functiontype" :: String),
+                                 "lhs"  .= toJSON i,
+                                 "rhs"  .= toJSON o]
+
+instance FromJSON Type where
+  parseJSON (Object v) = do
+    role <- v .: "role"
+    if role == ("rawtype" :: String)
+       then RawType <$> v .: "type"
+       else FunType <$> v .: "lhs" <*> v .: "rhs"
+  parseJSON _          = mzero
 
 data Name = Name String deriving (Show, Eq)
 
@@ -157,15 +181,15 @@ eqConsts (Eq lhs rhs) = nub (termConsts lhs ++ termConsts rhs)
 
 termConsts :: Term -> [Const]
 termConsts t = nub $ case t of
-  App lhs rhs -> termConsts lhs ++ termConsts rhs
-  C c         -> [c]
-  V v         -> []
+  App lhs rhs _ -> termConsts lhs ++ termConsts rhs
+  C c           -> [c]
+  V v           -> []
 
 termVars :: Term -> [Var]
 termVars t = nub $ case t of
-  App lhs rhs -> termVars lhs ++ termVars rhs
-  C c         -> []
-  V v         -> [v]
+  App lhs rhs _ -> termVars lhs ++ termVars rhs
+  C c           -> []
+  V v           -> [v]
 
 sigConsts :: Sig -> [Const]
 sigConsts (Sig cs vs) = cs
@@ -174,7 +198,10 @@ sigVars :: Sig -> [Var]
 sigVars (Sig cs vs) = vs
 
 varName :: Var -> Name
-varName (Var (Type t) i a) = Name ("(var, " ++ t ++ ", " ++ show i ++ ")")
+varName (Var t i a) = Name ("(var, " ++ typeName t ++ ", " ++ show i ++ ")")
+
+typeName (RawType t) = t
+typeName (FunType i o) = "(" ++ typeName i ++ ") -> (" ++ typeName o ++ ")"
 
 varArity (Var t i a) = a
 
@@ -190,27 +217,36 @@ constType :: Const -> Type
 constType (Const a n t) = t
 
 termType :: Term -> Maybe Type
-termType (C c)     = Just (constType c)
-termType (V v)     = Just (varType   v)
-termType (App l r) = do
-  Type lType <- termType l
-  Type rType <- termType r
-  let left  = "typeRep ([] :: [" ++ lType ++ "])"
-      right = "typeRep ([] :: [" ++ rType ++ "])"
-      expr' = withMods ["Data.Typeable"] . raw $
-                "funResultTy (" ++ left ++ ") (" ++ right ++ ")"
-      expr  = expr' {
-        eExpr = concat ["case (" ++ eExpr expr' ++ ") of {",
+termType (C c)       = Just (constType c)
+termType (V v)       = Just (varType   v)
+termType (App l r t) = t
 
-                        " Nothing -> error \"Incompatible types '",
-                        lType, "' '", rType, "'\";",
+app l r = App l r (getTermType l r)
 
-                        " Just t -> show t;",
+getTermType :: Term -> Term -> Maybe Type
+getTermType l r = do
+  lType <- termType l
+  case lType of
+       FunType _ o                          -> return o
+       RawType t | not ("->" `isInfixOf` t) -> Nothing
+       RawType _                            -> do
+         rType <- termType r
+         let left  = "typeRep ([] :: [" ++ typeName lType ++ "])"
+             right = "typeRep ([] :: [" ++ typeName rType ++ "])"
+             expr' = withMods ["Data.Typeable"] . raw $
+                       "funResultTy (" ++ left ++ ") (" ++ right ++ ")"
+             expr  = expr' {
+               eExpr = concat ["case (" ++ eExpr expr' ++ ") of {",
 
-                        "}"]
-      }
-  result <- unsafePerformIO (eval expr)
-  return (Type result)
+                               " Nothing -> error \"Incompatible types '",
+                               typeName lType, "' '", typeName rType, "'\";",
+
+                               " Just t -> show t;",
+
+                               "}"]
+             }
+         result <- unsafePerformIO (eval expr)
+         return (RawType result)
 
 termType' :: Term -> Type
 termType' t = let Just x = termType t in x
@@ -227,6 +263,6 @@ varsFrom :: [Object] -> [Var]
 varsFrom _ = []
 
 termArity :: Term -> Arity
-termArity (C c)     = constArity c
-termArity (V v)     = varArity v
-termArity (App l r) = termArity l - 1
+termArity (C c)       = constArity c
+termArity (V v)       = varArity v
+termArity (App l r _) = termArity l - 1

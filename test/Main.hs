@@ -175,7 +175,7 @@ nonEqualElementsSeparate t v = match classes expected && match expected classes
   where (a:b:c:d:e:f:_) = map extend [0..]
 
         extend 0 = t
-        extend n = App v (extend (n-1))
+        extend n = app v (extend (n-1))
 
         eqs = [Eq a b, Eq b c, Eq d e, Eq e f]
 
@@ -207,10 +207,10 @@ classesNotSingletons (Eqs eqs) = all nonSingle classes
         classes     = classesFromEqs eqs
 
 canFindClosure t v = all match expected
-  where -- Generate unique terms by wrapping in "App c"
+  where -- Generate unique terms by wrapping in "app c"
         (a:b:c:d:e:f:g:h:_) = map extend [0..]
         extend 0 = t
-        extend n = App v (extend (n-1))
+        extend n = app v (extend (n-1))
 
         match (x, xs) = setEq (eqClosure eqs x) xs
 
@@ -362,9 +362,9 @@ checkEvalTypes' term = monadicIO . checkTypes $ exprs
 
 canPruneEqs = canPruneEqs'
 
-canPruneEqs' eqs = monadicIO $ do
+canPruneEqs' (Eqs eqs) = monadicIO $ do
     out <- run $ pruneEqs' format eqs
-    monitor (counterexample (show (("eqs", eqs), ("out", out))))
+    monitor (counterexample (show (("eqs", map quick eqs), ("out", out))))
     assert (expected out)
   where format (WS pruned) = showEqsOnLines (WS (indent pruned))
         expected Nothing   = False
@@ -372,12 +372,18 @@ canPruneEqs' eqs = monadicIO $ do
                                   [] -> x == ""  -- No output when no eqs
                                   _  -> "==" `isInfixOf` (x :: String)
 
-canGetTermType (Type input) (Type output) = expected (termType term)
-  where term  = App (C (Const undefined undefined func))
-                    (C (Const undefined undefined (Type input)))
-        func  = Type $ concat ["(", input, ") -> (", output, ")"]
+-- | Strip types, since they're very expensive to show
+quick (Eq l r) = Eq (q l) (q r)
+  where q (C c)       = C c
+        q (V v)       = V v
+        q (App l r _) = App l r Nothing
+
+canGetTermType input output = expected (termType' term)
+  where term  = app (C (Const undefined undefined func))
+                    (C (Const undefined undefined input))
+        func  = FunType input output
         strip = filter (/= ' ')
-        expected (Just (Type x)) = strip x === strip output
+        expected t = strip (typeName t) === strip (typeName output)
 
 noTrivialTerms t = forAll (termOfType t) (not . trivial)
 
@@ -479,39 +485,41 @@ renameEqs eqs = if consistentEqs eqs
   where renameEq (Eq l r) = Eq <$> renameTerm l <*> renameTerm r
         renameTerm (C (Const a _ t)) = C <$> (Const a <$> arbitrary <*> pure t)
         renameTerm (V v)             = pure (V v)
-        renameTerm (App l r)         = App <$> renameTerm l <*> renameTerm r
+        renameTerm (App l r _)       = app <$> renameTerm l <*> renameTerm r
 
 consistentEqs eqs = let nts = concatMap eqNames eqs
                      in consistentNames nts
 
 instance Arbitrary Equation where
-  arbitrary = do Type t <- arbitrary
-                 l <- termOfType (Type t)
-                 r <- termOfType (Type t)
+  arbitrary = do t <- arbitrary
+                 l <- termOfType t
+                 r <- termOfType t
                  if trivial l && trivial r || l == r || allVar l || allVar r
                     then discard
                     else return $ Eq l r
 
   shrink (Eq l r) = [Eq l' r' | (l', r') <- shrink (l, r),
-                     termType' l' == termType' r',
-                     not (trivial l' && trivial r')]
+                     not (trivial l' && trivial r'),
+                     not (allVar l'),
+                     not (allVar r'),
+                     termType' l' == termType' r']
 
 -- | Generate a "non-trivial" Term, i.e. containing at least one App, one Const
 --   and one Var, with the given Type
 termOfType :: Type -> Gen Term
 termOfType t = do
-  -- Generate a random Term of the correct type, of the form `App l r`
+  -- Generate a random Term of the correct type, of the form `app l r`
   term <- appOfTypeArity 0 t
   -- Force one branch to contain a Var and the other to contain a Const
   giveVarConst term
 
 -- | Force one branch of an `App` to contain a Const and the other to contain a
 --   Var
-giveVarConst (App l r) = do
+giveVarConst (App l r _) = do
   which <- arbitrary
   l'    <- if     which then giveVar l else giveConst l
   r'    <- if not which then giveVar r else giveConst r
-  return (App l' r')
+  return (app l' r')
 
 -- | Randomly replace part of the given Term with a Var
 giveVar :: Term -> Gen Term
@@ -521,19 +529,19 @@ giveVar (V v) = return (V v)
 
 -- Turn Consts into Vars. Since Consts may have higher arity (up to 5) than Vars
 -- (up to 2), we rely on the App cases to prevent hitting high-arity Terms
-giveVar (C c) = V <$> varOfTypeArity (constArity c) (constType  c)
+giveVar (C c) = V <$> varOfTypeArity (constArity c) (constType c)
 
 -- Don't recurse any further if we reach an arity of 2, since we might reach a
 -- sub-Term with an arity above 2, which cannot be turned into a Var
-giveVar t | termArity t >= 2 = V <$> varOfTypeArity (termArity  t)
-                                                    (termType'  t)
+giveVar t | termArity t >= 2 = V <$> varOfTypeArity (termArity t)
+                                                    (termType' t)
 
 -- If it's safe to recurse, choose a branch at random to force a Var into
-giveVar (App l r) = do
+giveVar (App l r _) = do
   which <- arbitrary
   l'    <- if     which then giveVar l else return l
   r'    <- if not which then giveVar r else return r
-  return (App l' r')
+  return (app l' r')
 
 -- | Randomly replace part of a Term with a Const
 giveConst :: Term -> Gen Term
@@ -552,11 +560,11 @@ giveConst t | termArity t >= 5 = C <$> constOfTypeArity (termArity t)
 
 -- It's safe to recurse into low-arity Apps. We pick a branch randomly to put a
 -- Const into
-giveConst (App l r) = do
+giveConst (App l r _) = do
   which <- arbitrary
   l'    <- if     which then giveConst l else return l
   r'    <- if not which then giveConst r else return r
-  return (App l' r')
+  return (app l' r')
 
 constOfTypeArity :: Arity -> Type -> Gen Const
 constOfTypeArity a t = if a > 5
@@ -569,13 +577,11 @@ varOfTypeArity a t = if a > 2
   else Var t <$> choose (0, 4) <*> pure a
 
 appOfTypeArity :: Arity -> Type -> Gen Term
-appOfTypeArity a (Type t) = do
-  Type arg <- arbitrary
-  r        <- termOfTypeArity 0 (Type arg)
-  l        <- termOfTypeArity (a+1) (Type (concat ["(", arg, ")",
-                                                   " -> ",
-                                                   "(", t,   ")"]))
-  return $ App l r
+appOfTypeArity a t = do
+  arg <- arbitrary
+  r   <- termOfTypeArity 0 arg
+  l   <- termOfTypeArity (a+1) (FunType arg t)
+  return $ app l r
 
 termOfTypeArity :: Arity -> Type -> Gen Term
 termOfTypeArity a t = oneof (mkConst ++ mkVar ++ mkApp)
@@ -602,23 +608,23 @@ trivial x | not (hasVar   x) = True
 trivial x | not (hasConst x) = True
 trivial x                    = False
 
-hasConst (V _)     = False
-hasConst (C _)     = True
-hasConst (App l r) = hasConst l || hasConst r
+hasConst (V _)       = False
+hasConst (C _)       = True
+hasConst (App l r _) = hasConst l || hasConst r
 
-hasVar (V _)     = True
-hasVar (C _)     = False
-hasVar (App l r) = hasVar l || hasVar r
+hasVar (V _)       = True
+hasVar (C _)       = False
+hasVar (App l r _) = hasVar l || hasVar r
 
-allVar (V _) = True
-allVar (C _) = False
-allVar (App l r) = allVar l && allVar r
+allVar (V _)       = True
+allVar (C _)       = False
+allVar (App l r _) = allVar l && allVar r
 
 -- | Make sure no name is used for constants of two types
 termNames :: Term -> [(Name, Type)]
 termNames (C (Const _ n t)) = [(n, t)]
 termNames (V _)             = []
-termNames (App l r)         = nub (termNames l ++ termNames r)
+termNames (App l r _)       = nub (termNames l ++ termNames r)
 
 eqNames :: Equation -> [(Name, Type)]
 eqNames (Eq l r) = termNames l ++ termNames r
@@ -634,23 +640,23 @@ instance Arbitrary Term where
     t <- arbitrary
     termOfType t
 
-  shrink (C c)       = C <$> shrink c
-  shrink (V v)       = V <$> shrink v
-  shrink t@(App l r) = [C (Const (termArity t) (termName t) (termType' t))] ++
-                       [App l' r' | (l', r') <- shrink (l, r)]
+  shrink (C c)         = C <$> shrink c
+  shrink (V v)         = V <$> shrink v
+  shrink t@(App l r _) = [C (Const (termArity t) (termName t) (termType' t))] ++
+                         [app l' r' | (l', r') <- shrink (l, r)]
 
-termName (C c)     = constName c
-termName (V v)     = Name (filter isAlpha (show (varType v) ++ show (varArity v)))
-termName (App l r) = let Name l' = termName l
-                         Name r' = termName r
-                      in Name ("app" ++ l' ++ r')
+termName (C c)       = constName c
+termName (V v)       = Name (filter isAlpha (show (varType v) ++ show (varArity v)))
+termName (App l r _) = let Name l' = termName l
+                           Name r' = termName r
+                        in Name ("app" ++ l' ++ r')
 
 instance Arbitrary Var where
   arbitrary = sized $ \n -> do
     arity <- elements [0, 1, 2]
     typ   <- naryType arity n
     index <- elements [0, 1, 2]
-    return $ Var (Type typ) index (Arity arity)
+    return $ Var typ index (Arity arity)
 
   shrink (Var t i a) = if i == 0
                           then []
@@ -661,7 +667,7 @@ instance Arbitrary Const where
     arity <- elements [0..5]
     name  <- arbitrary
     typ   <- naryType arity n
-    return $ Const (Arity arity) name (Type typ)
+    return $ Const (Arity arity) name typ
 
   shrink (Const a n t) = do n' <- shrink n
                             return (Const a n' t)
@@ -672,7 +678,7 @@ instance Arbitrary Sig where
   shrink (Sig cs vs) = Sig [] [] : [Sig cs' vs' | (cs', vs') <- shrink (cs, vs)]
 
 instance Arbitrary Type where
-  arbitrary = Type <$> sized sizedType
+  arbitrary = sized sizedType
 
 instance Arbitrary Name where
   arbitrary = Name <$> listOf1 (arbitrary `suchThat` isAlpha)
@@ -682,23 +688,23 @@ instance Arbitrary Name where
                         names    = map Name nonEmpty
                      in reverse names -- Try shortest first
 
-sizedType :: Int -> Gen String
-sizedType 0 = elements ["Int", "Bool", "Float"]
+sizedType :: Int -> Gen Type
+sizedType 0 = elements [RawType "Int", RawType "Bool", RawType "Float"]
 sizedType n = oneof [
     sizedType 0,
     do x <- sizedType (n - 1)
-       return $ "[" ++ x ++ "]",
+       return $ RawType ("[" ++ typeName x ++ "]"),
     do n' <- choose (0, n - 1)
        l  <- sizedType n'
        r  <- sizedType (n - n')
-       return $ "(" ++ l ++ ", " ++ r ++ ")"
+       return $ RawType ("(" ++ typeName l ++ ", " ++ typeName r ++ ")")
   ]
 
 naryType 0 n = sizedType n
 naryType a n = do
   arg <- sizedType n
   ret <- naryType (a-1) n
-  return $ "(" ++ arg ++ ") -> (" ++ ret ++ ")"
+  return $ FunType arg ret
 
 dbg :: (Show a, Monad m) => a -> PropertyM m ()
 dbg = monitor . counterexample . show
