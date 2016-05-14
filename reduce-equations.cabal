@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                reduce-equations
-version:             0.1.0.0
+version:             0.1.0.1
 synopsis:            Simplify a set of equations by removing redundancies
 -- description:         
 homepage:            http://chriswarbo.net/git/reduce-equations
@@ -41,7 +41,8 @@ executable reduce-equations
   -- other-extensions:    
   build-depends:       base >=4.8 && <4.9
                      , reduce-equations
-  hs-source-dirs:      src
+                     , aeson
+  hs-source-dirs:      reduce-equations
   default-language:    Haskell2010
 
 test-suite test

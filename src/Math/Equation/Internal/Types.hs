@@ -112,6 +112,7 @@ instance ToJSON Type where
                                  "rhs"  .= toJSON o]
 
 instance FromJSON Type where
+  parseJSON (String s) = RawType <$> parseJSON (String s)
   parseJSON (Object v) = do
     role <- v .: "role"
     if role == ("rawtype" :: String)

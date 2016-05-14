@@ -10,23 +10,25 @@ import           Data.List
 import           Data.Maybe
 import qualified Data.Sequence   as Seq
 import qualified Data.Stringable as S
-import Language.Eval.Internal
-import System.Directory
-import System.IO.Unsafe
-import Test.QuickCheck
-import Test.QuickCheck.Monadic
-import Test.Tasty            (defaultMain, testGroup, localOption)
-import Test.Tasty.QuickCheck
-
+import           Language.Eval.Internal
+import           Math.Equation.Internal
+import           Math.Equation.Reduce
+import           System.Directory
+import           System.IO.Unsafe
+import           Test.QuickCheck
+import           Test.QuickCheck.Monadic
 import qualified Test.QuickSpec.Term
-
-import Math.Equation.Reduce
-import Math.Equation.Internal
+import           Test.Tasty            (defaultMain, testGroup, localOption)
+import           Test.Tasty.QuickCheck
 
 main = defaultMain $ testGroup "All tests" [
-    testProperty "Can parse example equations"  canParseExamples
-  , testProperty "Can evaluate equations"       canEvalExamples
-  , testProperty "Can make signature"           canMakeSignature
+    testProperty "Can parse equations"          canParseEquations
+  , testProperty "Can parse terms"              canParseTerms
+  , testProperty "Can parse variables"          canParseVars
+  , testProperty "Can parse constants"          canParseConsts
+  , testProperty "Can parse examples"           canParseExamples
+  , testProperty "Can evaluate examples"        canEvalExamples
+  , testProperty "Can make example signature"   canMakeSignature
   , testProperty "Constants added"              constantsAdded
   , testProperty "Variables added"              variablesAdded
   , testProperty "Sigs render"                  sigsRender
@@ -59,13 +61,55 @@ main = defaultMain $ testGroup "All tests" [
 
 -- Tests
 
+canParseEquations = all try [
+      "{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}}}",
+      "{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":8}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":8}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}}}"
+    ]
+  where try x = case decode x of
+                     Nothing       -> False
+                     Just (Eq l r) -> True
+
+canParseTerms = all try [
+      "{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"}",
+      "{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}",
+      "{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}",
+      "{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":8}",
+      "{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}}",
+      "{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}}",
+      "{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":8}}",
+      "{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}}",
+      "{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}}",
+      "{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}}",
+      "{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":8}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":8}}"
+    ]
+  where try x = case (decode x) :: Maybe Term of
+                     Nothing -> error ("Couldn't decode " ++ S.toString x)
+                     Just _  -> True
+
+canParseVars = all try [
+      "{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}",
+      "{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}"
+    ]
+  where try x = case (decode x) :: Maybe Var of
+          Nothing -> error ("Couldn't decode " ++ S.toString x)
+          Just _  -> True
+
+canParseConsts = all try [
+      "{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"}"
+    ]
+  where try x = case (decode x) :: Maybe Const of
+          Nothing -> error ("Couldn't decode " ++ S.toString x)
+          Just _  -> True
+
 canParseExamples = not (null exampleEqs)
 
-canEvalExamples = withExamples strict
-  where strict (!x) = True
+canEvalExamples = withExamples allStrict
+  where allStrict []     = True
+        allStrict (x:xs) = strict x && allStrict xs
+        strict (Eq !l !r) = True
 
 canMakeSignature = withExamples makeSig
-  where makeSig xs = case sigFrom xs of
+  where makeSig xs = case sigFromEqs xs of
                           Sig !cs !vs -> True
 
 constantsAdded cs s = case withConsts cs s of
@@ -434,9 +478,8 @@ variableSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
 
 -- Example input from files
 
-exampleEqs :: [[Object]]
-exampleEqs = map parse exampleJson
-  where parse x = fromMaybe (error ("Failed to parse JSON: " ++ x)) (decode (pack x))
+exampleEqs :: [[Equation]]
+exampleEqs = map parseLines exampleJson
 
 exampleJson :: [String]
 {-# NOINLINE exampleJson #-}
@@ -699,7 +742,7 @@ dbg :: (Show a, Monad m) => a -> PropertyM m ()
 dbg = monitor . counterexample . show
 
 doOnce :: (Show a, Arbitrary a, Testable prop) => (a -> prop) -> Property
-doOnce = once . forAll (resize 3 arbitrary)
+doOnce = once . forAll (resize 42 arbitrary)
 
 -- | The list of all terms equal to `x`, according to `eqs`
 eqClosure :: [Equation] -> Term -> Seq.Seq Term
