@@ -108,7 +108,7 @@ render :: Sig -> TypedExpr QSSig
 render (Sig cs vs) = mappend' (renderConsts cs) (renderVars vs)
 
 renderConsts :: [Const] -> TypedExpr QSSig
-renderConsts cs = foldr (mappend' . renderConst) empty' cs
+renderConsts = foldr (mappend' . renderConst) empty'
 
 renderConst :: Const -> TypedExpr QSSig
 renderConst c = (f $$$ name) $$$ v
@@ -133,7 +133,7 @@ renderConst c = (f $$$ name) $$$ v
 --   one go
 renderVars :: [Var] -> TypedExpr QSSig
 renderVars vs = collapse (map renderGroup (sameTypes vs))
-  where collapse ss        = foldr mappend' empty' ss
+  where collapse           = foldr mappend' empty'
         renderGroup []     = empty'
         renderGroup (v:vs) = if varArity v > 2
                                 then error ("Var arity too big: " ++ show (
@@ -158,7 +158,7 @@ renderTypedVars a t ns = (gvars $$$ names') $$$ genOf' t
         names' = collapse (map (\(Name n) -> TE (asString n)) ns)
 
         collapse :: [TypedExpr a] -> TypedExpr [a]
-        collapse xs = foldr (\x -> ($$$) (cons' $$$ x)) nil' xs
+        collapse = foldr (\x -> ((cons' $$$ x) $$$)) nil'
 
 -- Wrappers for Prelude functions
 
@@ -298,7 +298,7 @@ genOf' t = return' $$$ undef
 classesFromEqs :: [Equation] -> [[Term]]
 classesFromEqs = combine [] . map nub . addAllToClasses []
 
-addAllToClasses cs es = foldl addToClasses cs es
+addAllToClasses = foldl addToClasses
 
 addToClasses cs (Eq l r) = case cs of
   []   -> [[l, r]]
@@ -312,7 +312,7 @@ combine acc (c:cs) = case nub (overlaps c) of
                           [] -> combine (c:acc) cs
                           xs -> combine [c ++ concat xs] (without xs)
   where classesWith t = filter (t `elem`) (acc ++ cs)
-        overlaps ts   = foldr ((++) . classesWith) [] ts
+        overlaps      = foldr ((++) . classesWith) []
         without xs    = filter (`notElem` xs) (acc ++ cs)
 
 unSomeClasses :: [Equation] -> [WithSig [Test.QuickSpec.Term.Expr a]]
@@ -331,7 +331,7 @@ unSomePrune clss = WS ((((prune' $$$ arg1) $$$ arg2) $$$ id') $$$ arg3)
         clss' = map (\(WS x) -> x) clss
 
 mkUniv2 :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
-mkUniv2 = foldr (\x -> ($$$) (append' $$$ ((map' $$$ univ2) $$$ x))) nil'
+mkUniv2 = foldr (\x -> ((append' $$$ ((map' $$$ univ2) $$$ x)) $$$)) nil'
 
 univ2 :: TypedExpr (Test.QuickSpec.Term.Expr a -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term)
 univ2 = tlam "y" body `withType` t
@@ -349,7 +349,7 @@ strip' = tlam "x" body `withType` "Test.QuickSpec.Term.Expr a -> a"
   where body = TE $ withMods ["Data.Typeable"] "undefined"
 
 getTermHead :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Term.Term]
-getTermHead = foldr (\ c -> ($$$) (cons' $$$ (term' $$$ (head' $$$ c)))) nil'
+getTermHead = foldr (\c -> ((cons' $$$ (term' $$$ (head' $$$ c))) $$$)) nil'
 
 mkEqs2 :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Equation.Equation]
 mkEqs2 []     = nil'

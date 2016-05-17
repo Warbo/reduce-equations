@@ -104,7 +104,7 @@ canParseConsts = all try [
 canParseExamples = not (null exampleEqs)
 
 canEvalExamples = withExamples allStrict
-  where allStrict xs = foldr ((&&) . strict) True xs
+  where allStrict = foldr ((&&) . strict) True
         strict (Eq !l !r) = True
 
 canMakeSignature = withExamples makeSig
