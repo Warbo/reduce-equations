@@ -22,6 +22,5 @@ parseLines s = map parse eqLines
         eqLines = filter ("{" `isPrefixOf`) (lines s)
 
 parse :: String -> Equation
-parse l = case decode (S.fromString l) of
-               Nothing -> error ("Couldn't parse line: " ++ l)
-               Just e  -> e
+parse l = fromMaybe (error ("Couldn't parse line: " ++ l))
+                    (decode (S.fromString l))

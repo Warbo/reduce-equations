@@ -82,7 +82,7 @@ canParseTerms = all try [
       "{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}}",
       "{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":8}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":8}}"
     ]
-  where try x = case (decode x) :: Maybe Term of
+  where try x = case decode x :: Maybe Term of
                      Nothing -> error ("Couldn't decode " ++ S.toString x)
                      Just _  -> True
 
@@ -90,22 +90,21 @@ canParseVars = all try [
       "{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}",
       "{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}"
     ]
-  where try x = case (decode x) :: Maybe Var of
+  where try x = case decode x :: Maybe Var of
           Nothing -> error ("Couldn't decode " ++ S.toString x)
           Just _  -> True
 
 canParseConsts = all try [
       "{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"}"
     ]
-  where try x = case (decode x) :: Maybe Const of
+  where try x = case decode x :: Maybe Const of
           Nothing -> error ("Couldn't decode " ++ S.toString x)
           Just _  -> True
 
 canParseExamples = not (null exampleEqs)
 
 canEvalExamples = withExamples allStrict
-  where allStrict []     = True
-        allStrict (x:xs) = strict x && allStrict xs
+  where allStrict xs = foldr ((&&) . strict) True xs
         strict (Eq !l !r) = True
 
 canMakeSignature = withExamples makeSig
@@ -197,8 +196,8 @@ eqPartsAppearInSameClass eqs = counterexample (show debug) test
   where test                        = all eqPartsInSameClass eqs
         classes                     = classesFromEqs eqs
         matchingClass t             = head $ filter (t `elem`) classes
-        eqPartsInSameClass (Eq l r) = r `elem` (matchingClass l) &&
-                                      l `elem` (matchingClass r)
+        eqPartsInSameClass (Eq l r) = r `elem` matchingClass l &&
+                                      l `elem` matchingClass r
         debug                       = (("eqs", eqs), ("classes", classes))
 
 classesHaveNoDupes eqs = counterexample (show debug) test
@@ -227,8 +226,7 @@ nonEqualElementsSeparate t v = match classes expected && match expected classes
 
         expected = [[a, b, c], [d, e, f]]
 
-        match    []  ys = True
-        match (x:xs) ys = any (setEq x) ys && match xs ys
+        match xs ys = foldr (\x -> (&&) (any (setEq x) ys)) True xs
 
 classElementsAreEqual (Eqs eqs) = all elementsAreEqual classes
   where classes :: [[Term]]
@@ -318,11 +316,11 @@ checkEvalTypes' term = monadicIO . checkTypes $ exprs
                Nothing -> do dbg (("expr", e), ("type", t))
                              assert False
                Just "" -> assert True
-               Just s  -> do dbg (("expr", e), ("type", t), ("result", s))
+               Just s  -> dbg (("expr", e), ("type", t), ("result", s))
           checkTypes es
 
         mkExpr :: [Mod] -> TypedExpr a -> TypedExpr (IO ())
-        mkExpr ms e = ("const" $$$ "return ()") $$$ (withMods' ms e)
+        mkExpr ms e = ("const" $$$ "return ()") $$$ withMods' ms e
 
         -- The expressions we want to check the types of
         exprs :: [(TypedExpr a, String, [Mod])]
@@ -674,7 +672,7 @@ instance Arbitrary Term where
 
   shrink (C c)         = C <$> shrink c
   shrink (V v)         = V <$> shrink v
-  shrink t@(App l r _) = [C (Const (termArity t) (termName t) (termType' t))] ++
+  shrink t@(App l r _) = C (Const (termArity t) (termName t) (termType' t)) :
                          [app l' r' | (l', r') <- shrink (l, r)]
 
 termName (C c)       = constName c
@@ -749,8 +747,8 @@ eqClosure :: [Equation] -> Term -> Seq.Seq Term
 eqClosure eqs x = indirect eqs Seq.empty (directEq eqs x)
 
 indirect :: [Equation] -> Seq.Seq Term -> Seq.Seq Term -> Seq.Seq Term
-indirect eqs seen xs | null xs   = seen
-indirect eqs seen xs | otherwise = indirect eqs (nub' $ seen Seq.>< unseen) unseen
+indirect eqs seen xs | null xs = seen
+indirect eqs seen xs           = indirect eqs (nub' $ seen Seq.>< unseen) unseen
   where new       = xs >>= directEq eqs
         unseen    = nub' $ Seq.filter notSeen new
         notSeen a = not (a `isElem` seen)

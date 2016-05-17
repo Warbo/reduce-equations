@@ -98,9 +98,9 @@ sigToSym :: Term -> WithSig Test.QuickSpec.Term.Symbol
 sigToSym t = WS (head' $$$ filtered)
   where pred     = tlam "x" (("==" $$$ ("name" $$$ "x")) $$$ name')
         Name n   = case t of
-                        C c       -> constName c
-                        V v       -> varName   v
-                        App _ _ _ -> error ("Tried to get symbol for " ++ show t)
+                        C c   -> constName c
+                        V v   -> varName   v
+                        App{} -> error ("Tried to get symbol for " ++ show t)
         name'    = TE (asString n)
         filtered = (filter' $$$ pred) $$$ (symbols' $$$ "givenSig")
 
@@ -108,8 +108,7 @@ render :: Sig -> TypedExpr QSSig
 render (Sig cs vs) = mappend' (renderConsts cs) (renderVars vs)
 
 renderConsts :: [Const] -> TypedExpr QSSig
-renderConsts []     = empty'
-renderConsts (c:cs) = mappend' (renderConst c) (renderConsts cs)
+renderConsts cs = foldr (mappend' . renderConst) empty' cs
 
 renderConst :: Const -> TypedExpr QSSig
 renderConst c = (f $$$ name) $$$ v
@@ -134,8 +133,7 @@ renderConst c = (f $$$ name) $$$ v
 --   one go
 renderVars :: [Var] -> TypedExpr QSSig
 renderVars vs = collapse (map renderGroup (sameTypes vs))
-  where collapse []        = empty'
-        collapse (s:ss)    = mappend' s (collapse ss)
+  where collapse ss        = foldr mappend' empty' ss
         renderGroup []     = empty'
         renderGroup (v:vs) = if varArity v > 2
                                 then error ("Var arity too big: " ++ show (
@@ -160,8 +158,7 @@ renderTypedVars a t ns = (gvars $$$ names') $$$ genOf' t
         names' = collapse (map (\(Name n) -> TE (asString n)) ns)
 
         collapse :: [TypedExpr a] -> TypedExpr [a]
-        collapse []     = nil'
-        collapse (x:xs) = (cons' $$$ x) $$$ collapse xs
+        collapse xs = foldr (\x -> ($$$) (cons' $$$ x)) nil' xs
 
 -- Wrappers for Prelude functions
 
@@ -245,8 +242,8 @@ initial' :: TypedExpr (Int
                   -> [Test.QuickSpec.Term.Symbol]
                   -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
                   -> Ctx)
-initial' = qsQual "Test.QuickSpec.Reasoning.NaiveEquationalReasoning" $
-               "initial"
+initial' = qsQual "Test.QuickSpec.Reasoning.NaiveEquationalReasoning"
+                  "initial"
 
 maxDepth' :: TypedExpr (QSSig -> Int)
 maxDepth' = qsQual "Test.QuickSpec.Signature" "maxDepth"
@@ -301,8 +298,7 @@ genOf' t = return' $$$ undef
 classesFromEqs :: [Equation] -> [[Term]]
 classesFromEqs = combine [] . map nub . addAllToClasses []
 
-addAllToClasses cs    []  = cs
-addAllToClasses cs (e:es) = addAllToClasses (addToClasses cs e) es
+addAllToClasses cs es = foldl addToClasses cs es
 
 addToClasses cs (Eq l r) = case cs of
   []   -> [[l, r]]
@@ -315,10 +311,9 @@ combine []  (c:cs) = combine [c] cs
 combine acc (c:cs) = case nub (overlaps c) of
                           [] -> combine (c:acc) cs
                           xs -> combine [c ++ concat xs] (without xs)
-  where classesWith t   = filter (t `elem`) (acc ++ cs)
-        overlaps []     = []
-        overlaps (t:ts) = classesWith t ++ overlaps ts
-        without xs      = filter (`notElem` xs) (acc ++ cs)
+  where classesWith t = filter (t `elem`) (acc ++ cs)
+        overlaps ts   = foldr ((++) . classesWith) [] ts
+        without xs    = filter (`notElem` xs) (acc ++ cs)
 
 unSomeClasses :: [Equation] -> [WithSig [Test.QuickSpec.Term.Expr a]]
 unSomeClasses eqs = map mkUnSomeClass (classesFromEqs eqs)
@@ -330,14 +325,13 @@ mkUnSomeClass (x:xs) = case (termToExpr x, mkUnSomeClass xs) of
 
 unSomePrune :: [WithSig [Test.QuickSpec.Term.Expr a]] -> WithSig [Test.QuickSpec.Equation.Equation]
 unSomePrune clss = WS ((((prune' $$$ arg1) $$$ arg2) $$$ id') $$$ arg3)
-  where arg1  = ((initial' $$$ (maxDepth' $$$ "givenSig")) $$$ (symbols' $$$ "givenSig")) $$$ (mkUniv2 clss')
-        arg2  = (filter' $$$ (compose' not' isUndefined')) $$$ getTermHead clss'
-        arg3  = sort' $$$ (mkEqs2 clss')
+  where arg1  = ((initial' $$$ (maxDepth' $$$ "givenSig")) $$$ (symbols' $$$ "givenSig")) $$$ mkUniv2 clss'
+        arg2  = (filter' $$$ compose' not' isUndefined') $$$ getTermHead clss'
+        arg3  = sort' $$$ mkEqs2 clss'
         clss' = map (\(WS x) -> x) clss
 
 mkUniv2 :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
-mkUniv2 []     = nil'
-mkUniv2 (x:cs) = (append' $$$ ((map' $$$ univ2) $$$ x)) $$$ (mkUniv2 cs)
+mkUniv2 = foldr (\x -> ($$$) (append' $$$ ((map' $$$ univ2) $$$ x))) nil'
 
 univ2 :: TypedExpr (Test.QuickSpec.Term.Expr a -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term)
 univ2 = tlam "y" body `withType` t
@@ -355,12 +349,11 @@ strip' = tlam "x" body `withType` "Test.QuickSpec.Term.Expr a -> a"
   where body = TE $ withMods ["Data.Typeable"] "undefined"
 
 getTermHead :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Term.Term]
-getTermHead []     = nil'
-getTermHead (c:cs) = (cons' $$$ (term' $$$ (head' $$$ c))) $$$ getTermHead cs
+getTermHead = foldr (\ c -> ($$$) (cons' $$$ (term' $$$ (head' $$$ c)))) nil'
 
 mkEqs2 :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Equation.Equation]
 mkEqs2 []     = nil'
-mkEqs2 (c:cs) = (append' $$$ (f $$$ c)) $$$ (mkEqs2 cs)
+mkEqs2 (c:cs) = (append' $$$ (f $$$ c)) $$$ mkEqs2 cs
   where f = tlam "(z:zs)" "[term y :=: term z | y <- zs]"
 
 sort' :: Ord a => TypedExpr ([a] -> [a])
@@ -389,7 +382,7 @@ withMods' :: [Mod] -> TypedExpr a -> TypedExpr a
 withMods' ms (TE e) = TE (withMods ms (withQS e))
 
 pruneEqs :: [Equation] -> IO (Maybe String)
-pruneEqs eqs = pruneEqs' showEqsOnLines eqs
+pruneEqs = pruneEqs' showEqsOnLines
 
 showEqsOnLines (WS pruned) = WS (unlines' $$$ shown')
   where shown' = (map' $$$ (showEquation' $$$ "givenSig")) $$$ pruned
@@ -399,4 +392,4 @@ pruneEqs' f eqs = exec main'
   where pruned = unSomePrune clss
         sig    = sigFromEqs eqs
         clss   = unSomeClasses eqs
-        main'  = "putStrLn" $$$ (renderWithSig (f pruned) sig)
+        main'  = "putStrLn" $$$ renderWithSig (f pruned) sig
