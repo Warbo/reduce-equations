@@ -1,42 +1,30 @@
 #!/usr/bin/env bash
 
-MSG="cabal build"
-if OUTPUT=$(cabal build 2>&1)
-then
-    echo "ok - $MSG"
-else
-    echo "$OUTPUT" 1>&2
-    echo "not ok - $MSG"
-fi
+ERR=0
+function report {
+    if [[ "$1" -eq 0 ]]
+    then
+        echo "ok - $2"
+    else
+        echo "$OUTPUT" 1>&2
+        echo "not ok - $MSG"
+        ERR=1
+    fi
+}
 
-MSG="cabal test"
-if OUTPUT=$(cabal test 2>&1)
-then
-    echo "ok - $MSG"
-else
-    echo "$OUTPUT" 1>&2
-    echo "not ok - $MSG"
-fi
+OUTPUT=$(cabal build 2>&1)
+report "$?" "cabal build"
+
+OUTPUT=$(cabal test 2>&1)
+report "$?" "cabal test"
 
 for F in test/data/*.json
 do
-    MSG="Reducing $F"
-    if OUTPUT=$(cabal run -v0 reduce-equations < "$F" 2>&1)
-    then
-        echo "ok - $MSG"
-    else
-        echo "$OUTPUT" 1>&2
-        echo "not ok - $MSG"
-    fi
+    OUTPUT=$(cabal run -v0 reduce-equations < "$F" 2>&1)
+    report "$?" "Reducing $F"
 
-    MSG="Got equations from $F"
-    if echo "$OUTPUT" | grep "==" > /dev/null
-    then
-        echo "ok - $MSG"
-    else
-        echo "$OUTPUT" 1>&2
-        echo "not ok - $MSG"
-    fi
+    OUTPUT=$(echo "$OUTPUT" | grep "==")
+    report "$?" "Got equations from $F"
 done
 
-exit 0
+exit "$ERR"
