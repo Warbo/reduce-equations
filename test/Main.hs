@@ -117,14 +117,16 @@ constantsAdded cs s = case withConsts cs s of
 variablesAdded vs s = case withVars vs s of
   Sig _ vs' -> all (`elem` vs') vs
 
-sigsRender = testEval mkExpr (== Just "True")
-  where mkExpr s = let e = show' $$$ (f $$$ render s)
+sigsRender = run
+  where run      = testEval mkExpr (== Just "True")
+        mkExpr s = let e = show' $$$ (f $$$ render s)
                        f :: TypedExpr (QSSig -> Bool)
                        f = TE $ withQS "(const True :: Test.QuickSpec.Sig -> Bool)"
                     in (e, ("f", f))
 
-sigsHaveConsts = testEval mkExpr (== Just "True")
-  where mkExpr (s, cs) = let e            = show' $$$ (hasConsts $$$ render s')
+sigsHaveConsts = run
+  where run = testEval mkExpr (== Just "True")
+        mkExpr (s, cs) = let e            = show' $$$ (hasConsts $$$ render s')
                              s'           = withConsts cs s
 
                              hasConsts :: TypedExpr (QSSig -> Bool)
@@ -137,8 +139,9 @@ sigsHaveConsts = testEval mkExpr (== Just "True")
                              dbg          = ("names", names)
                           in (e, dbg)
 
-sigsHaveVars = testEval mkExpr (== Just "True")
-  where mkExpr (s, vs) = let e          = show' $$$ (hasVars $$$ render s')
+sigsHaveVars = run
+  where run = testEval mkExpr (== Just "True")
+        mkExpr (s, vs) = let e          = show' $$$ (hasVars $$$ render s')
                              s'         = withVars vs s
 
                              hasVars :: TypedExpr (QSSig -> Bool)
@@ -154,8 +157,9 @@ sigConstsUniqueIndices = doOnce sigConstsUniqueIndices'
 -- Use `c` to generate a bunch of similar constants `consts`, add them to `s` to
 -- get `sig`. Render `sig` to a QuickSpec signature, then print out its constant
 -- symbols and compare with those of `sig`.
-sigConstsUniqueIndices' s (Const a (Name n') t) = testEval mkExpr hasConsts
-  where n = 'x' : n'  -- Avoid issues with linefeed being cut off
+sigConstsUniqueIndices' s (Const a (Name n') t) = run
+  where run = testEval mkExpr hasConsts
+        n = 'x' : n'  -- Avoid issues with linefeed being cut off
         mkExpr () = let syms  = constantSymbols' $$$ render sig
                         names = (map' $$$ name') $$$ syms
                         e     = unlines' $$$ names
@@ -166,12 +170,13 @@ sigConstsUniqueIndices' s (Const a (Name n') t) = testEval mkExpr hasConsts
         consts = [Const a (Name (n ++ show i)) t | i <- [0..10]]
         sig    = withConsts consts s
 
-sigVarsUniqueIndices = doOnce sigVarsUniqueIndices'
+sigVarsUniqueIndices s v = let (mkExpr, hasVars) = sigVarsUniqueIndices' s v
+                            in doOnce (testEval mkExpr hasVars)
 
 -- Use `v` to generate a bunch of `Var`s of the same type, `vars`, add them to
 -- `s` to get `sig`. Render `sig` to a QuickSpec signature, then print out its
 -- variable symbols and compare with those of `sig`.
-sigVarsUniqueIndices' s (Var t _ a) = testEval mkExpr hasVars
+sigVarsUniqueIndices' s (Var t _ a) = (mkExpr, hasVars)
   where mkExpr () = let syms  = variableSymbols' $$$ render sig
                         names = (map' $$$ name') $$$ syms
                         e     = unlines' $$$ names
@@ -292,8 +297,9 @@ eqSigHasConsts eqs = counterexample debug test
 
 canRenderEqs = doOnce canRenderEqs'
 
-canRenderEqs' (Eqs eqs) = testEval mkExpr haveEqs
-  where mkExpr ()    = (indent expr, debug)
+canRenderEqs' (Eqs eqs) = run
+  where run          = testEval mkExpr haveEqs
+        mkExpr ()    = (indent expr, debug)
         expr         = renderWithSig (WS (unlines' $$$ shownEqs')) sig
         sig          = sigFromEqs eqs
         WS shownEqs' = WS ((map' $$$ (showEquation' $$$ "givenSig")) $$$ eqs')
@@ -435,14 +441,14 @@ putTrue  = TE $ "putStr" $$ asString "True"
 --   The type `b` is for any extra debug output to include in case of failure.
 testEval :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr String, b))
                                           -> (Maybe String -> Bool)
-                                          -> Property
+                                          -> (a -> Property)
 testEval = testEval' (\(TE e) -> eval e)
 
 -- | Check that the output of the generated `IO` actions satifies the given
 --   predicate. `b` is for extra debug output to include in case of failure.
 testExec :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr (IO e), b))
                                            -> (Maybe String -> Bool)
-                                           -> Property
+                                           -> (a -> Property)
 testExec = testEval' exec
 
 -- | Takes an expression-evaluating function, an expression-generating function
@@ -452,8 +458,8 @@ testExec = testEval' exec
 testEval' :: (Arbitrary a, Show a, Show b) => (TypedExpr e -> IO (Maybe String))
                                             -> (a -> (TypedExpr e, b))
                                             -> (Maybe String -> Bool)
-                                            -> Property
-testEval' evl mkExpr expect = forAll (resize 10 arbitrary) go
+                                            -> (a -> Property)
+testEval' evl mkExpr expect = {-forAll (resize 10 arbitrary)-} go
   where go arg = once $ monadicIO $ do
                    let (e, dbg) = mkExpr arg
                    result <- run (evl (indent e))

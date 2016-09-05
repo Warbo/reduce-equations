@@ -20,7 +20,8 @@ report "$?" "cabal test"
 
 for F in test/data/*.json
 do
-    OUTPUT=$(cabal run -v0 reduce-equations < "$F" 2>&1)
+    OUTPUT=$(NIX_EVAL_EXTRA_IMPORTS='[("runtime-arbitrary", "TestInstances")]' \
+               cabal run -v0 reduce-equations < "$F")
     report "$?" "Reducing $F"
 
     OUTPUT=$(echo "$OUTPUT" | grep "==")
