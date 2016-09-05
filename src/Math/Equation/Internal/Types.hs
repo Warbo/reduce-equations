@@ -5,10 +5,13 @@ module Math.Equation.Internal.Types where
 import           Control.Monad
 import           Data.Aeson
 import           Data.List
+import           Data.Maybe
 import           Data.Stringable
 import qualified Data.Text        as T
 import           Language.Eval
 import           System.IO.Unsafe
+import           System.Environment
+import           Text.Read  (readMaybe) -- Uses String as part of base, not Text
 
 -- Types to represent equations, constants, variables, etc. and functions for
 -- converting between representations
@@ -246,8 +249,17 @@ getTermType l r = do
 
                                "}"]
              }
-         result <- unsafePerformIO (eval expr)
+         result <- unsafePerformIO $ do
+           extraImports <- lookupEnv "NIX_EVAL_EXTRA_IMPORTS"
+           eval (augment extraImports expr)
          return (RawType result)
+  where modsOf x = do
+          ms <- x >>= readMaybe
+          return (map (\(p,m) -> (Pkg p, Mod m)) ms)
+        augment given expr = let pms = fromMaybe [] (modsOf given)
+                                 ps  = map fst pms
+                                 ms  = map snd pms
+                              in withPkgs ps (withMods ms expr)
 
 termType' :: Term -> Type
 termType' t = let Just x = termType t in x

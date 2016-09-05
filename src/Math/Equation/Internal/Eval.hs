@@ -14,9 +14,13 @@ module Math.Equation.Internal.Eval where
 -- `TypeRep`s as needed, as type annotations.
 
 import Data.List
+import Data.Maybe
 import Data.String
 import Language.Eval.Internal
 import Math.Equation.Internal.Types
+import System.Environment
+import System.IO
+import Text.Read  -- Uses String as part of base, not Text
 
 -- Used for their types
 import qualified Test.QuickCheck.Gen
@@ -61,7 +65,17 @@ withType (TE x) t = TE (x { eExpr = "((" ++ eExpr x ++ ") :: (" ++ t ++ "))" })
 -- Execute an expression, by evaluating it as the value of `main`. Returns the
 -- resulting stdout (or `Nothing` on error)
 exec :: TypedExpr (IO a) -> IO (Maybe String)
-exec (TE x) = eval' ("main = " ++) x
+exec (TE x) = do
+    extraImports <- lookupEnv "NIX_EVAL_EXTRA_IMPORTS"
+    eval' ("main = " ++)
+          (augment extraImports x)
+  where modsOf x = do
+          ms <- x >>= readMaybe
+          return (map (\(p,m) -> (Pkg p, Mod m)) ms)
+        augment given expr = let pms = fromMaybe [] (modsOf given)
+                                 ps  = map fst pms
+                                 ms  = map snd pms
+                              in withPkgs ps (withMods ms expr)
 
 -- Conversion from our representations to QuickSpec expressions
 
@@ -393,3 +407,5 @@ pruneEqs' f eqs = exec main'
         sig    = sigFromEqs eqs
         clss   = unSomeClasses eqs
         main'  = "putStrLn" $$$ renderWithSig (f pruned) sig
+
+putErr = hPutStrLn stderr
