@@ -219,7 +219,11 @@ classHasSameArity eqs = all oneArity classes
 equationsHaveSameArity (Eqs eqs) = all sameArity eqs
   where sameArity (Eq l r) = termArity l == termArity r
 
-nonEqualElementsSeparate t v = match classes expected && match expected classes
+nonEqualElementsSeparate ty = forAll (do t <- termOfType ty
+                                         v <- termOfType (FunType ty ty)
+                                         return (t, v)) nonEqualElementsSeparate'
+
+nonEqualElementsSeparate' (t, v) = match classes expected && match expected classes
   where (a:b:c:d:e:f:_) = map extend [0..]
 
         extend 0 = t
@@ -231,7 +235,7 @@ nonEqualElementsSeparate t v = match classes expected && match expected classes
 
         expected = [[a, b, c], [d, e, f]]
 
-        match xs ys = foldr (\x -> (&&) (any (setEq x) ys)) True xs
+        match xs ys = all (\x -> any (setEq x) ys) xs
 
 classElementsAreEqual (Eqs eqs) = all elementsAreEqual classes
   where classes :: [[Term]]
@@ -253,7 +257,11 @@ classesNotSingletons (Eqs eqs) = all nonSingle classes
   where nonSingle c = length c > 1
         classes     = classesFromEqs eqs
 
-canFindClosure t v = all match expected
+canFindClosure ty = forAll (do t <- termOfType ty
+                               v <- termOfType (FunType ty ty)
+                               return (t, v)) canFindClosure'
+
+canFindClosure' (t, v) = all match expected
   where -- Generate unique terms by wrapping in "app c"
         (a:b:c:d:e:f:g:h:_) = map extend [0..]
         extend 0 = t
@@ -772,3 +780,9 @@ directEq eqs x = x Seq.<| Seq.filter direct terms
   where terms            = Seq.fromList . nub . concatMap termsOf $ eqs
         termsOf (Eq a b) = [a, b]
         direct a         = Eq x a `elem` eqs || Eq a x `elem` eqs
+
+app l r = case termType l of
+    Just (FunType _ o) -> App l r (Just o)
+    _                  -> x
+  where [(Eq x _)] = unsafePerformIO (setEqTypes [Eq (App l r Nothing)
+                                                     (App l r Nothing)])

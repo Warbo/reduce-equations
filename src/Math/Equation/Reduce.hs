@@ -11,7 +11,8 @@ import           Math.Equation.Internal.Types
 
 parseAndReduce :: String -> IO String
 parseAndReduce s = do
-    result <- pruneEqs (parseLines s)
+    eqs    <- setEqTypes (parseLines s)
+    result <- pruneEqs eqs
     case result of
          Nothing -> error "Failed to reduce given input"
          Just o  -> return o

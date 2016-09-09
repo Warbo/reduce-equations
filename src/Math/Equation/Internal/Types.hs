@@ -59,7 +59,7 @@ instance FromJSON Term where
     case (role :: String) of
          "variable"    -> V <$> parseJSON (Object v)
          "constant"    -> C <$> parseJSON (Object v)
-         "application" -> app <$> v .: "lhs" <*> v .: "rhs"
+         "application" -> App <$> v .: "lhs" <*> v .: "rhs" <*> return Nothing
   parseJSON _          = mzero
 
 data Sig = Sig [Const] [Var] deriving (Show)
@@ -225,41 +225,91 @@ termType (C c)       = Just (constType c)
 termType (V v)       = Just (varType   v)
 termType (App l r t) = t
 
-app l r = App l r (getTermType l r)
+hasType (C c)             = True
+hasType (V v)             = True
+hasType (App l r Nothing) = False
+hasType (App l r _)       = hasType l && hasType r
 
-getTermType :: Term -> Term -> Maybe Type
-getTermType l r = do
-  lType <- termType l
-  case lType of
-       FunType _ o                          -> return o
-       RawType t | not ("->" `isInfixOf` t) -> Nothing
-       RawType _                            -> do
-         rType <- termType r
-         let left  = "typeRep ([] :: [" ++ typeName lType ++ "])"
-             right = "typeRep ([] :: [" ++ typeName rType ++ "])"
-             expr' = withMods ["Data.Typeable"] . raw $
-                       "funResultTy (" ++ left ++ ") (" ++ right ++ ")"
-             expr  = expr' {
-               eExpr = concat ["case (" ++ eExpr expr' ++ ") of {",
+exprsFrom :: Term -> [(Term, Expr)]
+exprsFrom t | hasType t = []
+exprsFrom (App l r (Just t)) = exprsFrom l ++ exprsFrom r
+exprsFrom (App l r Nothing)  = if hasType l && hasType r
+                                  then case termType' l of
+                                         FunType _ o -> []
+                                         RawType _   -> [(App l r Nothing, exprFor (App l r Nothing))]
+                                  else exprsFrom l ++ exprsFrom r
+  where exprFor (App l r _) = exprForType (termType' l) (termType' r)
 
-                               " Nothing -> error \"Incompatible types '",
-                               typeName lType, "' '", typeName rType, "'\";",
+runExprs :: [(Term, Expr)] -> IO [(Term, Type)]
+runExprs tes = process <$> eval expr
+  where expr         = pack' $$ (encode' $$ asList' (map assoc tes))
+        assoc (t, e) = ("(,)" $$ asString (encode t)) $$ ("show" $$ e)
 
-                               " Just t -> show t;",
+        encode'      = withPkgs ["aeson"] . withMods ["Data.Aeson"] $ "encode"
+        pack'        = withPkgs ["bytestring"] $ qualified "Data.ByteString.Lazy.Char8" "unpack"
 
-                               "}"]
+        process ms = fromJust $ do
+          s  <- ms
+          ss <- decode (fromString s)
+          mapM (\(trm, typ) -> do
+                   trm' <- decode (fromString trm)
+                   return (trm', RawType (read typ)))
+               ss
+
+setTypes :: [Equation] -> [(Term, Type)] -> [Equation]
+setTypes []           _  = []
+setTypes (Eq l r:eqs) db = Eq (setTermTypes l db) (setTermTypes r db) : setTypes eqs db
+
+setTermTypes :: Term -> [(Term, Type)] -> Term
+setTermTypes t           db | hasType t = t
+setTermTypes (App l r t) db             = case t' of
+                                            Nothing  -> App l' r' t
+                                            Just t'' -> App l' r' (Just t'')
+  where l' = setTermTypes l db
+        r' = setTermTypes r db
+        t' = lookup (App l r t) db
+
+setEqTypes :: [Equation] -> IO [Equation]
+setEqTypes eqs = if null exprs
+                    then return eqs
+                    else do
+                      types <- runExprs exprs
+                      setEqTypes (setTypes eqs types)
+  where terms = concatMap (\(Eq l r) -> [l, r]) eqs
+        exprs = concatMap exprsFrom terms
+
+asList' :: [Expr] -> Expr
+asList' []     = "[]"
+asList' (e:es) = ("(:)" $$ e) $$ asList' es
+
+augment = withPkgs ps . withMods ms
+  where ps            = map (Pkg . fst) extraImports
+        ms            = map (Mod . snd) extraImports
+        extraImports  = fromMaybe [] (given >>= readMaybe)
+        given         = unsafePerformIO (lookupEnv "NIX_EVAL_EXTRA_IMPORTS")
+
+exprForType :: Type -> Type -> Expr
+exprForType lType rType = augment expr
+  where expr'    = withMods ["Data.Typeable"] $
+                     ("funResultTy" $$ getRep left) $$ getRep right
+        expr     = case' expr' [
+                     ("Nothing", "error" $$ asString msg),
+                     ("Just t",  "show t")]
+        left     = typeName lType
+        right    = typeName rType
+        getRep t = raw $ "typeRep ([] :: [" ++ t ++ "])"
+        msg      = "'" ++ left ++ "' '" ++ right ++ "'"
+
+case' :: Expr -> [(Expr, Expr)] -> Expr
+case' x ps = mod $ x {
+               eExpr = "case (" ++ eExpr x ++ ") of {" ++
+                         intercalate "; " clauses ++ "}"
              }
-         result <- unsafePerformIO $ do
-           extraImports <- lookupEnv "NIX_EVAL_EXTRA_IMPORTS"
-           eval (augment extraImports expr)
-         return (RawType result)
-  where modsOf x = do
-          ms <- x >>= readMaybe
-          return (map (\(p,m) -> (Pkg p, Mod m)) ms)
-        augment given expr = let pms = fromMaybe [] (modsOf given)
-                                 ps  = map fst pms
-                                 ms  = map snd pms
-                              in withPkgs ps (withMods ms expr)
+  where clauses = map mkClause ps
+        mkClause (pat, val) = eExpr pat ++ " -> " ++ eExpr val
+        mod  = withMods mods . withPkgs pkgs
+        mods = concatMap (\(pat, val) -> eMods pat ++ eMods val) ps
+        pkgs = concatMap (\(pat, val) -> ePkgs pat ++ ePkgs val) ps
 
 termType' :: Term -> Type
 termType' t = let Just x = termType t in x
@@ -279,3 +329,7 @@ termArity :: Term -> Arity
 termArity (C c)       = constArity c
 termArity (V v)       = varArity v
 termArity (App l r _) = termArity l - 1
+
+
+addTypes :: [Equation] -> IO [Equation]
+addTypes = undefined
