@@ -780,8 +780,8 @@ directEq eqs x = x Seq.<| Seq.filter direct terms
 app l r = case termType l of
     Just (FunType _ o) -> App l r (Just o)
     _                  -> x
-  where [Eq x _] = unsafePerformIO (setEqTypes [Eq (App l r Nothing)
-                                                   (App l r Nothing)])
+  where [Eq x _] = setAllTypes [Eq (App l r Nothing)
+                                   (App l r Nothing)]
 
 iterable ty = do t <- termOfType ty
                  v <- termOfType (FunType ty ty)

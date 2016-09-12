@@ -12,7 +12,6 @@ import           Language.Eval
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
 import qualified Language.Haskell.Exts.Pretty as HSE.Pretty
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
-import           System.IO.Unsafe
 import           System.Environment
 import           Text.Read  (readMaybe) -- Uses String as part of base, not Text
 
@@ -233,45 +232,6 @@ hasType (V v)             = True
 hasType (App l r Nothing) = False
 hasType (App l r _)       = hasType l && hasType r
 
-exprsFrom :: Term -> [(Term, Expr)]
-exprsFrom t | hasType t = []
-exprsFrom (App l r (Just t)) = exprsFrom l ++ exprsFrom r
-exprsFrom (App l r Nothing)  = if hasType l && hasType r
-                                  then case termType' l of
-                                         FunType _ o -> []
-                                         RawType _   -> [(App l r Nothing, exprFor (App l r Nothing))]
-                                  else exprsFrom l ++ exprsFrom r
-  where exprFor (App l r _) = exprForType (termType' l) (termType' r)
-
-runExprs :: [(Term, Expr)] -> IO [(Term, Type)]
-runExprs tes = process <$> eval expr
-  where expr         = pack' $$ (encode' $$ asList' (map assoc tes))
-        assoc (t, e) = ("(,)" $$ asString (encode t)) $$ ("show" $$ e)
-
-        encode'      = withPkgs ["aeson"] . withMods ["Data.Aeson"] $ "encode"
-        pack'        = withPkgs ["bytestring"] $ qualified "Data.ByteString.Lazy.Char8" "unpack"
-
-        process ms = fromJust $ do
-          s  <- ms
-          ss <- decode (fromString s)
-          mapM (\(trm, typ) -> do
-                   trm' <- decode (fromString trm)
-                   return (trm', RawType (read typ)))
-               ss
-
-setTypes :: [Equation] -> [(Term, Type)] -> [Equation]
-setTypes []           _  = []
-setTypes (Eq l r:eqs) db = Eq (setTermTypes l db) (setTermTypes r db) : setTypes eqs db
-
-setTermTypes :: Term -> [(Term, Type)] -> Term
-setTermTypes t           db | hasType t = t
-setTermTypes (App l r t) db             = case t' of
-                                            Nothing  -> App l' r' t
-                                            Just t'' -> App l' r' (Just t'')
-  where l' = setTermTypes l db
-        r' = setTermTypes r db
-        t' = lookup (App l r t) db
-
 setAllTypes :: [Equation] -> [Equation]
 setAllTypes = map setForEq
   where setForEq (Eq l r) = Eq (setForTerm l) (setForTerm r)
@@ -288,47 +248,9 @@ setAllTypes = map setForEq
                   HSE.Parser.ParseOk x           -> error ("Expected function type, got " ++ show x)
                   HSE.Parser.ParseFailed _ e     -> error ("Parsing type failed: " ++ e)
 
-setEqTypes :: [Equation] -> IO [Equation]
-setEqTypes eqs = if null exprs
-                    then return eqs
-                    else do
-                      types <- runExprs exprs
-                      setEqTypes (setTypes eqs types)
-  where terms = concatMap (\(Eq l r) -> [l, r]) eqs
-        exprs = concatMap exprsFrom terms
-
 asList' :: [Expr] -> Expr
 asList' []     = "[]"
 asList' (e:es) = ("(:)" $$ e) $$ asList' es
-
-augment = withPkgs ps . withMods ms
-  where ps            = map (Pkg . fst) extraImports
-        ms            = map (Mod . snd) extraImports
-        extraImports  = fromMaybe [] (given >>= readMaybe)
-        given         = unsafePerformIO (lookupEnv "NIX_EVAL_EXTRA_IMPORTS")
-
-exprForType :: Type -> Type -> Expr
-exprForType lType rType = augment expr
-  where expr'    = withMods ["Data.Typeable"] $
-                     ("funResultTy" $$ getRep left) $$ getRep right
-        expr     = case' expr' [
-                     ("Nothing", "error" $$ asString msg),
-                     ("Just t",  "show t")]
-        left     = typeName lType
-        right    = typeName rType
-        getRep t = raw $ "typeRep ([] :: [" ++ t ++ "])"
-        msg      = "'" ++ left ++ "' '" ++ right ++ "'"
-
-case' :: Expr -> [(Expr, Expr)] -> Expr
-case' x ps = mod $ x {
-               eExpr = "case (" ++ eExpr x ++ ") of {" ++
-                         intercalate "; " clauses ++ "}"
-             }
-  where clauses = map mkClause ps
-        mkClause (pat, val) = eExpr pat ++ " -> " ++ eExpr val
-        mod  = withMods mods . withPkgs pkgs
-        mods = concatMap (\(pat, val) -> eMods pat ++ eMods val) ps
-        pkgs = concatMap (\(pat, val) -> ePkgs pat ++ ePkgs val) ps
 
 termType' :: Term -> Type
 termType' t = let Just x = termType t in x
@@ -348,7 +270,3 @@ termArity :: Term -> Arity
 termArity (C c)       = constArity c
 termArity (V v)       = varArity v
 termArity (App l r _) = termArity l - 1
-
-
-addTypes :: [Equation] -> IO [Equation]
-addTypes = undefined

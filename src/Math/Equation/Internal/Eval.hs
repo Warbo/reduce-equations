@@ -20,6 +20,7 @@ import Language.Eval.Internal
 import Math.Equation.Internal.Types
 import System.Environment
 import System.IO
+import System.IO.Unsafe
 import Text.Read  -- Uses String as part of base, not Text
 
 -- Used for their types
@@ -66,6 +67,11 @@ withType (TE x) t = TE (x { eExpr = "((" ++ eExpr x ++ ") :: (" ++ t ++ "))" })
 -- resulting stdout (or `Nothing` on error)
 exec :: TypedExpr (IO a) -> IO (Maybe String)
 exec (TE x) = eval' ("main = " ++) (augment x)
+  where augment = withPkgs ps . withMods ms
+        ps            = map (Pkg . fst) extraImports
+        ms            = map (Mod . snd) extraImports
+        extraImports  = fromMaybe [] (given >>= readMaybe)
+        given         = unsafePerformIO (lookupEnv "NIX_EVAL_EXTRA_IMPORTS")
 
 -- Conversion from our representations to QuickSpec expressions
 
