@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                reduce-equations
-version:             0.1.0.4
+version:             0.1.0.5
 synopsis:            Simplify a set of equations by removing redundancies
 -- description:         
 homepage:            http://chriswarbo.net/git/reduce-equations
@@ -25,6 +25,7 @@ library
   -- other-extensions:    
   build-depends:       base >=4.8 && <4.9
                      , aeson
+                     , bytestring
                      , QuickCheck
                      , quickspec
                      , transformers

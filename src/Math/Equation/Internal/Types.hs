@@ -234,8 +234,9 @@ hasType (App l r _)       = hasType l && hasType r
 
 setAllTypes :: [Equation] -> [Equation]
 setAllTypes = map setForEq
-  where setForEq (Eq l r) = Eq (setForTerm l) (setForTerm r)
-        setForTerm (C c)              = C c
+
+setForEq (Eq l r) = Eq (setForTerm l) (setForTerm r)
+  where setForTerm (C c)              = C c
         setForTerm (V v)              = V v
         setForTerm (App l r (Just t)) = App (setForTerm l) (setForTerm r) (Just t)
         setForTerm (App l r Nothing)  =

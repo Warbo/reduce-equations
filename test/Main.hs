@@ -487,7 +487,7 @@ variableSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
 -- Example input from files
 
 exampleEqs :: [[Equation]]
-exampleEqs = map parseLines exampleJson
+exampleEqs = map (parseLines . S.fromString) exampleJson
 
 exampleJson :: [String]
 {-# NOINLINE exampleJson #-}

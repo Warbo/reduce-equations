@@ -3,24 +3,35 @@
 module Math.Equation.Reduce where
 
 import           Data.Aeson
+import qualified Data.ByteString.Lazy  as BS
 import           Data.List
 import           Data.Maybe
 import qualified Data.Stringable as S
 import           Math.Equation.Internal.Eval
 import           Math.Equation.Internal.Types
 
-parseAndReduce :: String -> IO String
+doReduce = BS.getContents >>= parseAndReduce >>= putStrLn
+
+parseAndReduce :: BS.ByteString -> IO String
 parseAndReduce s = do
     result <- pruneEqs (parseLines s)
     case result of
          Nothing -> error "Failed to reduce given input"
          Just o  -> return o
 
-parseLines :: String -> [Equation]
-parseLines s = setAllTypes $ map parse eqLines
-  where eqLines :: [String]
-        eqLines = filter ("{" `isPrefixOf`) (lines s)
+parseLines :: BS.ByteString -> [Equation]
+parseLines s = map (setForEq . parse) eqLines
+  where eqLines :: [BS.ByteString]
+        eqLines = filter (BS.isPrefixOf "{") (BS.split newline s)
+        newline = head (BS.unpack "\n")
 
-parse :: String -> Equation
-parse l = fromMaybe (error ("Couldn't parse line: " ++ l))
-                    (decode (S.fromString l))
+parse :: BS.ByteString -> Equation
+parse l = fromMaybe (error ("Couldn't parse line: " ++ S.toString l))
+                    (decode l)
+
+{-
+pruneEqs2 :: [Equation] -> IO (Maybe String)
+pruneEqs2 = pruneEqs . alterTypes
+
+alterTypes =
+-}
