@@ -58,6 +58,7 @@ test-suite test
                      , directory
                      , aeson
                      , bytestring
+                     , haskell-src-exts
                      , nix-eval
                      , stringable
                      , containers

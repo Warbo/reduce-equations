@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TypeSynonymInstances #-}
 
 module Math.Equation.Internal.Types where
 
@@ -87,8 +87,8 @@ instance FromJSON Var where
     return (Var t i (Arity (countArity t)))
   parseJSON _          = mzero
 
-countArity (FunType i o) = 1 + countArity o
-countArity (RawType t)   = doCount t "->"
+countArity (HSE.Syntax.TyFun i o) = 1 + countArity o
+countArity _                      = 0
 
 doCount haystack needle = T.count (T.pack needle) (T.pack haystack)
 
@@ -107,23 +107,16 @@ instance FromJSON Const where
     return (Const (Arity (countArity t)) s t)
   parseJSON _          = mzero
 
-data Type = RawType String | FunType Type Type deriving (Show, Eq)
+type Type = HSE.Syntax.Type
 
 instance ToJSON Type where
-  toJSON (RawType s)   = object ["role" .= ("rawtype" :: String),
-                                 "type" .= toJSON s]
-  toJSON (FunType i o) = object ["role" .= ("functiontype" :: String),
-                                 "lhs"  .= toJSON i,
-                                 "rhs"  .= toJSON o]
+  toJSON = String . fromString . HSE.Pretty.prettyPrint
 
 instance FromJSON Type where
-  parseJSON (String s) = RawType <$> parseJSON (String s)
-  parseJSON (Object v) = do
-    role <- v .: "role"
-    if role == ("rawtype" :: String)
-       then RawType <$> v .: "type"
-       else FunType <$> v .: "lhs" <*> v .: "rhs"
-  parseJSON _          = mzero
+  parseJSON (String s) = case HSE.Parser.parseType (toString s) of
+    HSE.Parser.ParseOk t -> return t
+    _                    -> mzero
+  parseJSON _          =    mzero
 
 data Name = Name String deriving (Show, Eq)
 
@@ -206,8 +199,7 @@ sigVars (Sig cs vs) = vs
 varName :: Var -> Name
 varName (Var t i a) = Name ("(var, " ++ typeName t ++ ", " ++ show i ++ ")")
 
-typeName (RawType t) = t
-typeName (FunType i o) = "(" ++ typeName i ++ ") -> (" ++ typeName o ++ ")"
+typeName = HSE.Pretty.prettyPrint
 
 varArity (Var t i a) = a
 
@@ -243,11 +235,8 @@ setForEq (Eq l r) = Eq (setForTerm l) (setForTerm r)
           let l' = setForTerm l
               r' = setForTerm r
            in case termType' l' of
-                FunType _ o -> App l' r' (Just o)
-                RawType t   -> case HSE.Parser.parseType t of
-                  HSE.Parser.ParseOk (HSE.Syntax.TyFun _ o) -> App l' r' (Just (RawType (HSE.Pretty.prettyPrint o)))
-                  HSE.Parser.ParseOk x           -> error ("Expected function type, got " ++ show x)
-                  HSE.Parser.ParseFailed _ e     -> error ("Parsing type failed: " ++ e)
+                HSE.Syntax.TyFun _ o -> App l' r' (Just o)
+                x                    -> error ("Expected function type, got " ++ show x)
 
 asList' :: [Expr] -> Expr
 asList' []     = "[]"

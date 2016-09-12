@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings, PartialTypeSignatures, ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings, PartialTypeSignatures, ScopedTypeVariables, TypeSynonymInstances #-}
 
 module Main where
 
@@ -11,6 +11,7 @@ import           Data.Maybe
 import qualified Data.Sequence   as Seq
 import qualified Data.Stringable as S
 import           Language.Eval.Internal
+import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Math.Equation.Internal
 import           Math.Equation.Reduce
 import           System.Directory
@@ -422,7 +423,7 @@ canPruneEqs' (Eqs eqs) = monadicIO $ do
 canGetTermType input output = expected (termType' term)
   where term  = app (C (Const undefined undefined func))
                     (C (Const undefined undefined input))
-        func  = FunType input output
+        func  = tyFun input output
         strip = filter (/= ' ')
         expected t = strip (typeName t) === strip (typeName output)
 
@@ -620,7 +621,7 @@ appOfTypeArity :: Arity -> Type -> Gen Term
 appOfTypeArity a t = do
   arg <- arbitrary
   r   <- termOfTypeArity 0 arg
-  l   <- termOfTypeArity (a+1) (FunType arg t)
+  l   <- termOfTypeArity (a+1) (tyFun arg t)
   return $ app l r
 
 termOfTypeArity :: Arity -> Type -> Gen Term
@@ -729,22 +730,22 @@ instance Arbitrary Name where
                      in reverse names -- Try shortest first
 
 sizedType :: Int -> Gen Type
-sizedType 0 = elements [RawType "Int", RawType "Bool", RawType "Float"]
+sizedType 0 = elements [tyCon "Int", tyCon "Bool", tyCon "Float"]
 sizedType n = oneof [
     sizedType 0,
     do x <- sizedType (n - 1)
-       return $ RawType ("[" ++ typeName x ++ "]"),
+       return $ tyCon ("[" ++ typeName x ++ "]"),
     do n' <- choose (0, n - 1)
        l  <- sizedType n'
        r  <- sizedType (n - n')
-       return $ RawType ("(" ++ typeName l ++ ", " ++ typeName r ++ ")")
+       return $ tyCon ("(" ++ typeName l ++ ", " ++ typeName r ++ ")")
   ]
 
 naryType 0 n = sizedType n
 naryType a n = do
   arg <- sizedType n
   ret <- naryType (a-1) n
-  return $ FunType arg ret
+  return $ tyFun arg ret
 
 dbg :: (Show a, Monad m) => a -> PropertyM m ()
 dbg = monitor . counterexample . show
@@ -778,11 +779,15 @@ directEq eqs x = x Seq.<| Seq.filter direct terms
         direct a         = Eq x a `elem` eqs || Eq a x `elem` eqs
 
 app l r = case termType l of
-    Just (FunType _ o) -> App l r (Just o)
-    _                  -> x
+    Just (HSE.Syntax.TyFun _ o) -> App l r (Just o)
+    _                           -> x
   where [Eq x _] = setAllTypes [Eq (App l r Nothing)
                                    (App l r Nothing)]
 
 iterable ty = do t <- termOfType ty
-                 v <- termOfType (FunType ty ty)
+                 v <- termOfType (tyFun ty ty)
                  return (t, v)
+
+tyFun = HSE.Syntax.TyFun
+
+tyCon = HSE.Syntax.TyCon . HSE.Syntax.UnQual . HSE.Syntax.Ident
