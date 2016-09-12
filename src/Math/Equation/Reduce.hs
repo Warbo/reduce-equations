@@ -11,14 +11,13 @@ import           Math.Equation.Internal.Types
 
 parseAndReduce :: String -> IO String
 parseAndReduce s = do
-    eqs    <- setEqTypes (parseLines s)
-    result <- pruneEqs eqs
+    result <- pruneEqs (parseLines s)
     case result of
          Nothing -> error "Failed to reduce given input"
          Just o  -> return o
 
 parseLines :: String -> [Equation]
-parseLines s = map parse eqLines
+parseLines s = setAllTypes $ map parse eqLines
   where eqLines :: [String]
         eqLines = filter ("{" `isPrefixOf`) (lines s)
 

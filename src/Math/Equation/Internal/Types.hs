@@ -9,6 +9,9 @@ import           Data.Maybe
 import           Data.Stringable
 import qualified Data.Text        as T
 import           Language.Eval
+import qualified Language.Haskell.Exts.Parser as HSE.Parser
+import qualified Language.Haskell.Exts.Pretty as HSE.Pretty
+import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           System.IO.Unsafe
 import           System.Environment
 import           Text.Read  (readMaybe) -- Uses String as part of base, not Text
@@ -268,6 +271,22 @@ setTermTypes (App l r t) db             = case t' of
   where l' = setTermTypes l db
         r' = setTermTypes r db
         t' = lookup (App l r t) db
+
+setAllTypes :: [Equation] -> [Equation]
+setAllTypes = map setForEq
+  where setForEq (Eq l r) = Eq (setForTerm l) (setForTerm r)
+        setForTerm (C c)              = C c
+        setForTerm (V v)              = V v
+        setForTerm (App l r (Just t)) = App (setForTerm l) (setForTerm r) (Just t)
+        setForTerm (App l r Nothing)  =
+          let l' = setForTerm l
+              r' = setForTerm r
+           in case termType' l' of
+                FunType _ o -> App l' r' (Just o)
+                RawType t   -> case HSE.Parser.parseType t of
+                  HSE.Parser.ParseOk (HSE.Syntax.TyFun _ o) -> App l' r' (Just (RawType (HSE.Pretty.prettyPrint o)))
+                  HSE.Parser.ParseOk x           -> error ("Expected function type, got " ++ show x)
+                  HSE.Parser.ParseFailed _ e     -> error ("Parsing type failed: " ++ e)
 
 setEqTypes :: [Equation] -> IO [Equation]
 setEqTypes eqs = if null exprs
