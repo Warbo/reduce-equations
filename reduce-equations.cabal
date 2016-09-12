@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                reduce-equations
-version:             0.1.0.3
+version:             0.1.0.4
 synopsis:            Simplify a set of equations by removing redundancies
 -- description:         
 homepage:            http://chriswarbo.net/git/reduce-equations
@@ -30,6 +30,7 @@ library
                      , transformers
                      , mtl
                      , nix-eval
+                     , haskell-src-exts
                      , stringable
                      , text
   hs-source-dirs:      src

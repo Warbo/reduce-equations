@@ -157,13 +157,13 @@ sigConstsUniqueIndices = doOnce sigConstsUniqueIndices'
 -- Use `c` to generate a bunch of similar constants `consts`, add them to `s` to
 -- get `sig`. Render `sig` to a QuickSpec signature, then print out its constant
 -- symbols and compare with those of `sig`.
-sigConstsUniqueIndices' s (Const a (Name n') t) = run
-  where run = testEval mkExpr hasConsts
-        n = 'x' : n'  -- Avoid issues with linefeed being cut off
+sigConstsUniqueIndices' s (Const a (Name n') t) = testEval mkExpr hasConsts
+  where n = 'x' : n'  -- Avoid issues with linefeed being cut off
         mkExpr () = let syms  = constantSymbols' $$$ render sig
                         names = (map' $$$ name') $$$ syms
                         e     = unlines' $$$ names
-                     in (e, ("consts", consts))
+                     in (e, (("consts",    consts),
+                             ("sigconsts", sigConsts sig)))
         hasConsts Nothing    = error "Failed to evaluate"
         hasConsts (Just out) = setEq (map Name (lines out))
                                      (map constName (sigConsts sig))
@@ -219,9 +219,7 @@ classHasSameArity eqs = all oneArity classes
 equationsHaveSameArity (Eqs eqs) = all sameArity eqs
   where sameArity (Eq l r) = termArity l == termArity r
 
-nonEqualElementsSeparate ty = forAll (do t <- termOfType ty
-                                         v <- termOfType (FunType ty ty)
-                                         return (t, v)) nonEqualElementsSeparate'
+nonEqualElementsSeparate ty = forAll (iterable ty) nonEqualElementsSeparate'
 
 nonEqualElementsSeparate' (t, v) = match classes expected && match expected classes
   where (a:b:c:d:e:f:_) = map extend [0..]
@@ -257,9 +255,7 @@ classesNotSingletons (Eqs eqs) = all nonSingle classes
   where nonSingle c = length c > 1
         classes     = classesFromEqs eqs
 
-canFindClosure ty = forAll (do t <- termOfType ty
-                               v <- termOfType (FunType ty ty)
-                               return (t, v)) canFindClosure'
+canFindClosure ty = forAll (iterable ty) canFindClosure'
 
 canFindClosure' (t, v) = all match expected
   where -- Generate unique terms by wrapping in "app c"
@@ -784,5 +780,9 @@ directEq eqs x = x Seq.<| Seq.filter direct terms
 app l r = case termType l of
     Just (FunType _ o) -> App l r (Just o)
     _                  -> x
-  where [(Eq x _)] = unsafePerformIO (setEqTypes [Eq (App l r Nothing)
-                                                     (App l r Nothing)])
+  where [Eq x _] = unsafePerformIO (setEqTypes [Eq (App l r Nothing)
+                                                   (App l r Nothing)])
+
+iterable ty = do t <- termOfType ty
+                 v <- termOfType (FunType ty ty)
+                 return (t, v)
