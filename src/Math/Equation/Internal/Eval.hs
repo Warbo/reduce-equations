@@ -364,7 +364,8 @@ getTermHead = foldr (\c -> ((cons' $$$ (term' $$$ (head' $$$ c))) $$$)) nil'
 mkEqs2 :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Equation.Equation]
 mkEqs2 []     = nil'
 mkEqs2 (c:cs) = (append' $$$ (f $$$ c)) $$$ mkEqs2 cs
-  where f = tlam "(z:zs)" "[term y :=: term z | y <- zs]"
+  where f    = TE $ withMods ["Test.QuickSpec.Equation"] g
+        TE g = tlam "(z:zs)" "[term y :=: term z | y <- zs]"
 
 sort' :: Ord a => TypedExpr ([a] -> [a])
 sort' = TE $ qualified "Data.List" "sort"
@@ -395,13 +396,19 @@ pruneEqs :: [Equation] -> IO (Maybe String)
 pruneEqs = pruneEqs' showEqsOnLines
 
 showEqsOnLines (WS pruned) = WS (unlines' $$$ shown')
-  where shown' = (map' $$$ (showEquation' $$$ "givenSig")) $$$ pruned
+  where shown' = (map' $$$ showEq') $$$ pruned
+        showEq = TE . withPkgs ["mlspec-helper"] $ qualified "MLSpec.Helper" "showEq'"
+        showEq' = ("(.)" $$$ "show") $$$ (showEq $$$ "givenSig")
 
 pruneEqs' :: (WithSig [Test.QuickSpec.Equation.Equation] -> WithSig String) -> [Equation] -> IO (Maybe String)
-pruneEqs' f eqs = exec main'
-  where pruned = unSomePrune clss
-        sig    = sigFromEqs eqs
-        clss   = unSomeClasses eqs
-        main'  = "putStrLn" $$$ renderWithSig (f pruned) sig
+pruneEqs' f eqs = exec main''
+  where pruned   = unSomePrune clss
+        sig      = sigFromEqs eqs
+        clss     = unSomeClasses eqs
+        main''   = TE $ withPreamble decs main'
+        TE main' = "putStrLn" $$$ renderWithSig (f pruned) sig
+        decs     = concat ["newtype Z = Z () deriving (Eq, Show, Typeable);",
+                           "newtype S a = S a deriving (Eq, Show, Typeable);",
+                           "instance Ord Z where compare _ _ = EQ;"]
 
 putErr = hPutStrLn stderr

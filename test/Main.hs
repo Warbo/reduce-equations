@@ -789,5 +789,3 @@ iterable ty = do t <- termOfType ty
                  return (t, v)
 
 tyFun = HSE.Syntax.TyFun
-
-tyCon = HSE.Syntax.TyCon . HSE.Syntax.UnQual . HSE.Syntax.Ident
