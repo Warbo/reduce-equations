@@ -65,17 +65,7 @@ withType (TE x) t = TE (x { eExpr = "((" ++ eExpr x ++ ") :: (" ++ t ++ "))" })
 -- Execute an expression, by evaluating it as the value of `main`. Returns the
 -- resulting stdout (or `Nothing` on error)
 exec :: TypedExpr (IO a) -> IO (Maybe String)
-exec (TE x) = do
-    extraImports <- lookupEnv "NIX_EVAL_EXTRA_IMPORTS"
-    eval' ("main = " ++)
-          (augment extraImports x)
-  where modsOf x = do
-          ms <- x >>= readMaybe
-          return (map (\(p,m) -> (Pkg p, Mod m)) ms)
-        augment given expr = let pms = fromMaybe [] (modsOf given)
-                                 ps  = map fst pms
-                                 ms  = map snd pms
-                              in withPkgs ps (withMods ms expr)
+exec (TE x) = eval' ("main = " ++) (augment x)
 
 -- Conversion from our representations to QuickSpec expressions
 
