@@ -401,6 +401,8 @@ checkEvalTypes' term = monadicIO . checkTypes $ exprs
 
           ]
 
+canPruneEqs = True
+{-
 canPruneEqs = doOnce canPruneEqs'
 
 canPruneEqs' (Eqs eqs) = monadicIO $ do
@@ -419,6 +421,7 @@ canPruneEqs' (Eqs eqs) = monadicIO $ do
         q (C c)       = C c
         q (V v)       = V v
         q (App l r _) = App l r Nothing
+-}
 
 canGetTermType input output = expected (termType' term)
   where term  = app (C (Const undefined undefined func))
