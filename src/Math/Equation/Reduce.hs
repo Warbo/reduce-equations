@@ -4,6 +4,7 @@ module Math.Equation.Reduce where
 
 import           Data.Aeson
 import qualified Data.ByteString.Lazy.Char8 as BS
+import qualified Data.ByteString.Internal   as BI
 import           Data.List
 import           Data.Maybe
 import qualified Data.Stringable         as S
@@ -18,19 +19,21 @@ doReduce = BS.getContents >>= parseAndReduce >>= showEqs
 showEqs = mapM_ (BS.putStrLn . encode)
 
 parseAndReduce :: BS.ByteString -> IO [Equation]
-parseAndReduce s = do
-    let (db, eqs) = replaceTypes (parseLines s)
-    result <- pruneEqs eqs
-    case result of
-         Nothing -> error "Failed to reduce given input"
-         Just o  -> return (replaceVars db (S.fromString o))
+parseAndReduce s = reduction (parseLines s)
+
+reduction eqs = do
+  let (db, eqs') = replaceTypes eqs
+  result <- pruneEqs eqs'
+  case result of
+       Nothing -> error "Failed to reduce given input"
+       Just o  -> return (replaceVars db (S.fromString o))
+
 
 parseLines :: BS.ByteString -> [Equation]
 parseLines s = map (setForEq . parse) eqLines
   where eqLines :: [BS.ByteString]
         eqLines = filter (BS.isPrefixOf "{") (bsLines s)
-        bsLines = BS.split newline
-        newline = head (BS.unpack "\n")
+        bsLines = BS.split '\n' --(BI.c2w '\n')
 
 
 parse :: BS.ByteString -> Equation

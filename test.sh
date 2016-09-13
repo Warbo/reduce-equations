@@ -7,7 +7,7 @@ function report {
         echo "ok - $2"
     else
         echo "$OUTPUT" 1>&2
-        echo "not ok - $MSG"
+        echo "not ok - $2"
         ERR=1
     fi
 }
@@ -24,7 +24,7 @@ do
                cabal run -v0 reduce-equations < "$F")
     report "$?" "Reducing $F"
 
-    OUTPUT=$(echo "$OUTPUT" | grep "==")
+    OUTPUT=$(echo "$OUTPUT" | grep '^{')
     report "$?" "Got equations from $F"
 done
 

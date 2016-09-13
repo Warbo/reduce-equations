@@ -106,12 +106,12 @@ renderWithSig (WS (TE e)) sig = TE (e {
 
 sigToSym :: Term -> WithSig Test.QuickSpec.Term.Symbol
 sigToSym t = WS (head' $$$ filtered)
-  where pred     = tlam "x" (("==" $$$ ("name" $$$ "x")) $$$ name')
+  where pred     = tlam "x" (("==" $$$ (name' $$$ "x")) $$$ gotName')
         Name n   = case t of
                         C c   -> constName c
                         V v   -> varName   v
                         App{} -> error ("Tried to get symbol for " ++ show t)
-        name'    = TE (asString n)
+        gotName' = TE (asString n)
         filtered = (filter' $$$ pred) $$$ (symbols' $$$ "givenSig")
 
 render :: Sig -> TypedExpr QSSig
@@ -129,7 +129,7 @@ renderConst c = (f $$$ name) $$$ v
                       "fun" ++ show a
 
         v :: TypedExpr ()
-        v = TE . raw $ "undefined :: (" ++ typeName t ++ ")"
+        v = TE . raw $ "Prelude.undefined :: (" ++ typeName t ++ ")"
 
         Arity a = constArity c
         Name  n = constName  c
@@ -173,13 +173,13 @@ renderTypedVars a t ns = (gvars $$$ names') $$$ genOf' t
 -- Wrappers for Prelude functions
 
 map' :: TypedExpr ((a -> b) -> [a] -> [b])
-map' = "map"
+map' = "Prelude.map"
 
 return' :: Monad m => TypedExpr (a -> m b)
-return' = "return"
+return' = "Prelude.return"
 
 head' :: TypedExpr ([a] -> a)
-head' = "head"
+head' = "Prelude.head"
 
 nil' :: TypedExpr [a]
 nil' = "([])"
@@ -188,34 +188,34 @@ cons' :: TypedExpr (a -> [a] -> [a])
 cons' = "(:)"
 
 any' :: TypedExpr ((a -> Bool) -> [a] -> Bool)
-any' = "any"
+any' = "Prelude.any"
 
 show' :: Show a => TypedExpr (a -> String)
-show' = "show"
+show' = "Prelude.show"
 
 all' :: TypedExpr ((a -> Bool) -> [a] -> Bool)
-all' = "all"
+all' = "Prelude.all"
 
 join' :: Monad m => TypedExpr (m (m a) -> m a)
-join' = TE . withMods ["Control.Monad"] $ "join"
+join' = TE . qualified "Control.Monad" $ "join"
 
 mappend' :: TypedExpr a -> TypedExpr a -> TypedExpr a
-mappend' x y = (TE "mappend" $$$ x) $$$ y
+mappend' x y = (TE "Prelude.mappend" $$$ x) $$$ y
 
 id' :: TypedExpr (a -> a)
-id' = "id"
+id' = "Prelude.id"
 
 filter' :: TypedExpr ((a -> Bool) -> [a] -> [a])
-filter' = "filter"
+filter' = "Prelude.filter"
 
 not' :: TypedExpr (Bool -> Bool)
-not' = "not"
+not' = "Prelude.not"
 
 compose' :: TypedExpr (b -> c) -> TypedExpr (a -> b) -> TypedExpr (a -> c)
 compose' f g = ("(.)" $$$ f) $$$ g
 
 unlines' :: TypedExpr ([String] -> String)
-unlines' = "unlines"
+unlines' = "Prelude.unlines"
 
 -- Type synonyms for verbose QuickSpec types
 
@@ -303,7 +303,7 @@ isIn' = tlam "syms" (tlam "n" body)
 
 genOf' :: Type -> TypedExpr (Test.QuickCheck.Gen.Gen a)
 genOf' t = return' $$$ undef
-  where undef = TE . raw $ "undefined :: (" ++ typeName t ++ ")"
+  where undef = TE . raw $ "Prelude.undefined :: (" ++ typeName t ++ ")"
 
 classesFromEqs :: [Equation] -> [[Term]]
 classesFromEqs = combine [] . map nub . addAllToClasses []
@@ -356,7 +356,10 @@ conTagged' = TE $ qualified "Test.QuickSpec.Utils.Typed" "Tagged"
 
 strip' :: TypedExpr (Test.QuickSpec.Term.Expr Test.QuickSpec.Term.Term -> Test.QuickSpec.Term.Term)
 strip' = tlam "x" body `withType` "Test.QuickSpec.Term.Expr a -> a"
-  where body = TE $ withMods ["Data.Typeable"] "undefined"
+  where body     = TE $ withMods ["Data.Typeable"] undef
+        TE undef = undefined'
+
+undefined' = TE "Prelude.undefined"
 
 getTermHead :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Term.Term]
 getTermHead = foldr (\c -> ((cons' $$$ (term' $$$ (head' $$$ c))) $$$)) nil'
@@ -365,7 +368,7 @@ mkEqs2 :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.
 mkEqs2 []     = nil'
 mkEqs2 (c:cs) = (append' $$$ (f $$$ c)) $$$ mkEqs2 cs
   where f    = TE $ withMods ["Test.QuickSpec.Equation"] g
-        TE g = tlam "(z:zs)" "[term y :=: term z | y <- zs]"
+        TE g = tlam "(z:zs)" "[Test.QuickSpec.Term.term y :=: Test.QuickSpec.Term.term z | y <- zs]"
 
 sort' :: Ord a => TypedExpr ([a] -> [a])
 sort' = TE $ qualified "Data.List" "sort"
@@ -378,7 +381,7 @@ termToExpr t = WS (((expr' $$$ term) $$$ arity) $$$ eval)
         arity = TE (raw (show (let Arity a = termArity t in a)))
 
         -- Used for variable instantiation (which we avoid) and specifying type
-        eval  = "undefined" `withType` ("Valuation -> (" ++ typeName (termType' t) ++ ")")
+        eval  = undefined' `withType` ("Valuation -> (" ++ typeName (termType' t) ++ ")")
 
         expr' :: TypedExpr (_ -> Int -> _ -> Test.QuickSpec.Term.Expr _)
         expr' = TE (qualified "Test.QuickSpec.Term" "Expr")
@@ -398,17 +401,21 @@ pruneEqs = pruneEqs' showEqsOnLines
 showEqsOnLines (WS pruned) = WS (unlines' $$$ shown')
   where shown' = (map' $$$ showEq') $$$ pruned
         showEq = TE . withPkgs ["mlspec-helper"] $ qualified "MLSpec.Helper" "showEq'"
-        showEq' = ("(.)" $$$ "show") $$$ (showEq $$$ "givenSig")
+        showEq' = ("(.)" $$$ "Prelude.show") $$$ (showEq $$$ "givenSig")
 
 pruneEqs' :: (WithSig [Test.QuickSpec.Equation.Equation] -> WithSig String) -> [Equation] -> IO (Maybe String)
 pruneEqs' f eqs = exec main''
   where pruned   = unSomePrune clss
         sig      = sigFromEqs eqs
         clss     = unSomeClasses eqs
-        main''   = TE $ withPreamble decs main'
-        TE main' = "putStrLn" $$$ renderWithSig (f pruned) sig
+        main''   = TE . withMods ["Data.Typeable"]
+                      . withPreamble decs
+                      . withFlags ["--", "-fcontext-stack=1000"]
+                      $ main'
+        TE main' = "Prelude.putStrLn" $$$ renderWithSig (f pruned) sig
         decs     = concat ["newtype Z = Z () deriving (Eq, Show, Typeable);",
                            "newtype S a = S a deriving (Eq, Show, Typeable);",
-                           "instance Ord Z where compare _ _ = EQ;"]
+                           "instance Ord Z where { compare _ _ = Prelude.EQ; };",
+                           "instance (Ord a) => Ord (S a) where { compare (Main.S x) (Main.S y) = Prelude.compare x y; };"]
 
 putErr = hPutStrLn stderr

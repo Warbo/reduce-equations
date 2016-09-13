@@ -7,7 +7,8 @@ import           Data.Aeson
 import           Data.List
 import           Data.Maybe
 import           Data.Stringable
-import qualified Data.Text        as T
+import qualified Data.Text.Lazy          as T
+import qualified Data.Text.Lazy.Encoding as TE
 import           Language.Eval
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
 import qualified Language.Haskell.Exts.Pretty as HSE.Pretty
@@ -32,7 +33,7 @@ instance FromJSON Equation where
   parseJSON _          = mzero
 
 instance Show Equation where
-  show = toString . encode . toJSON
+  show = T.unpack . TE.decodeUtf8 . encode . toJSON
 
 data Term = App Term Term (Maybe Type) | C Const | V Var
 

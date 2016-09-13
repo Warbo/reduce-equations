@@ -4,7 +4,6 @@ module Main where
 
 import           Data.Aeson
 import qualified Data.ByteString as B
-import           Data.ByteString.Lazy.Char8 (pack, unpack)
 import           Data.Char
 import           Data.List
 import           Data.Maybe
@@ -401,27 +400,14 @@ checkEvalTypes' term = monadicIO . checkTypes $ exprs
 
           ]
 
-canPruneEqs = True
-{-
 canPruneEqs = doOnce canPruneEqs'
 
 canPruneEqs' (Eqs eqs) = monadicIO $ do
-    out <- run $ pruneEqs' format eqs
-    monitor (counterexample (show (("eqs", map quick eqs), ("out", out))))
-    assert (expected out)
-  where format (WS pruned) = showEqsOnLines (WS (indent pruned))
-
-        expected Nothing  = False
-        expected (Just x) = case eqs of
-                                 [] -> x == ""  -- No output when no eqs
-                                 _  -> "==" `isInfixOf` (x :: String)
-
-        -- | Strip types, since they're very expensive to show
-        quick (Eq l r) = Eq (q l) (q r)
-        q (C c)       = C c
-        q (V v)       = V v
-        q (App l r _) = App l r Nothing
--}
+    eqs' <- run $ reduction eqs
+    monitor (counterexample (show (("eqs", eqs), ("eqs'", eqs'))))
+    assert (expected eqs')
+  where expected []     =      null eqs -- No output when no eqs
+        expected (x:xs) = not (null eqs)
 
 canGetTermType input output = expected (termType' term)
   where term  = app (C (Const undefined undefined func))
