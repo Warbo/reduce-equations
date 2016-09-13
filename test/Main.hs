@@ -21,43 +21,46 @@ import qualified Test.QuickSpec.Term
 import           Test.Tasty            (defaultMain, testGroup, localOption)
 import           Test.Tasty.QuickCheck
 
-main = defaultMain $ testGroup "All tests" [
-    testProperty "Can parse equations"          canParseEquations
-  , testProperty "Can parse terms"              canParseTerms
-  , testProperty "Can parse variables"          canParseVars
-  , testProperty "Can parse constants"          canParseConsts
-  , testProperty "Can parse examples"           canParseExamples
-  , testProperty "Can evaluate examples"        canEvalExamples
-  , testProperty "Can make example signature"   canMakeSignature
-  , testProperty "Constants added"              constantsAdded
-  , testProperty "Variables added"              variablesAdded
-  , testProperty "Sigs render"                  sigsRender
-  , testProperty "Sigs have constants"          sigsHaveConsts
-  , testProperty "Sigs have variables"          sigsHaveVars
-  , testProperty "Constants are distinct"       sigConstsUniqueIndices
-  , testProperty "Variables are distinct"       sigVarsUniqueIndices
-  , testProperty "Can find closure of term"     canFindClosure
-  , testProperty "No classes without equations" noClassesFromEmptyEqs
-  , testProperty "Equation induces a class"     oneClassFromEq
-  , testProperty "Classes contain given terms"  classesHaveTerms
-  , testProperty "Equal terms in same class"    eqPartsAppearInSameClass
-  , testProperty "Terms appear in one class"    classesHaveNoDupes
-  , testProperty "Class elements are equal"     classElementsAreEqual
-  , testProperty "Non-equal elements separate"  nonEqualElementsSeparate
-  , testProperty "Classes have one arity"       classHasSameArity
-  , testProperty "Class length more than one"   classesNotSingletons
-  , testProperty "Can get classes from sig"     canGetClassesFromEqs
-  , testProperty "Can get sig from equations"   canGetSigFromEqs
-  , testProperty "Sig has equation variables"   eqSigHasVars
-  , testProperty "Sig has equation constants"   eqSigHasConsts
-  , testProperty "Equations have one arity"     equationsHaveSameArity
-  , testProperty "Can render equations"         canRenderEqs
-  , testProperty "Can prune equations"          canPruneEqs
-  , testProperty "Expression types match up"    checkEvalTypes
-  , testProperty "Can get type of terms"        canGetTermType
-  , testProperty "No trivial terms"             noTrivialTerms
-  , testProperty "Equations are consistent"     eqsAreConsistent
-  ]
+main = do
+  nix <- haveNix
+  defaultMain $ testGroup "All tests" ([
+      testProperty "Can parse equations"          canParseEquations
+    , testProperty "Can parse terms"              canParseTerms
+    , testProperty "Can parse variables"          canParseVars
+    , testProperty "Can parse constants"          canParseConsts
+    , testProperty "Can parse examples"           canParseExamples
+    , testProperty "Can evaluate examples"        canEvalExamples
+    , testProperty "Can make example signature"   canMakeSignature
+    , testProperty "Constants added"              constantsAdded
+    , testProperty "Variables added"              variablesAdded
+    , testProperty "Sigs render"                  sigsRender
+    , testProperty "Sigs have constants"          sigsHaveConsts
+    , testProperty "Sigs have variables"          sigsHaveVars
+    , testProperty "Constants are distinct"       sigConstsUniqueIndices
+    , testProperty "Variables are distinct"       sigVarsUniqueIndices
+    , testProperty "Can find closure of term"     canFindClosure
+    , testProperty "No classes without equations" noClassesFromEmptyEqs
+    , testProperty "Equation induces a class"     oneClassFromEq
+    , testProperty "Classes contain given terms"  classesHaveTerms
+    , testProperty "Equal terms in same class"    eqPartsAppearInSameClass
+    , testProperty "Terms appear in one class"    classesHaveNoDupes
+    , testProperty "Class elements are equal"     classElementsAreEqual
+    , testProperty "Non-equal elements separate"  nonEqualElementsSeparate
+    , testProperty "Classes have one arity"       classHasSameArity
+    , testProperty "Class length more than one"   classesNotSingletons
+    , testProperty "Can get classes from sig"     canGetClassesFromEqs
+    , testProperty "Can get sig from equations"   canGetSigFromEqs
+    , testProperty "Sig has equation variables"   eqSigHasVars
+    , testProperty "Sig has equation constants"   eqSigHasConsts
+    , testProperty "Equations have one arity"     equationsHaveSameArity
+    , testProperty "Can render equations"         canRenderEqs
+    , testProperty "Expression types match up"    checkEvalTypes
+    , testProperty "Can get type of terms"        canGetTermType
+    , testProperty "No trivial terms"             noTrivialTerms
+    , testProperty "Equations are consistent"     eqsAreConsistent
+    ] ++ if nix then [
+        testProperty "Can prune equations"          canPruneEqs
+      ] else [])
 
 -- Tests
 
