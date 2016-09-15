@@ -3,12 +3,13 @@
 module Main where
 
 import           Data.Aeson
-import qualified Data.ByteString as B
+import qualified Data.ByteString              as B
+import qualified Data.ByteString.Lazy         as LB
 import           Data.Char
 import           Data.List
 import           Data.Maybe
-import qualified Data.Sequence   as Seq
-import qualified Data.Stringable as S
+import qualified Data.Sequence                as Seq
+import qualified Data.Stringable              as S
 import           Language.Eval.Internal
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Math.Equation.Internal
@@ -58,9 +59,11 @@ main = do
     , testProperty "Can get type of terms"        canGetTermType
     , testProperty "No trivial terms"             noTrivialTerms
     , testProperty "Equations are consistent"     eqsAreConsistent
-    ] ++ [
-      testProperty "Can prune equations"          canPruneEqs | nix
-    ])
+    , testProperty "Switch function types"        switchFunctionTypes
+    ] ++ if nix then [
+      testProperty "Can prune equations"          canPruneEqs,
+      testProperty "Type parsing regression"      regressionTypeParse
+    ] else [])
 
 -- Tests
 
@@ -422,6 +425,17 @@ canGetTermType input output = expected (termType' term)
 noTrivialTerms t = forAll (termOfType t) (not . trivial)
 
 eqsAreConsistent (Eqs eqs) = consistentEqs eqs
+
+-- Given 'i' and 'o', we should be able to replace 'i -> o'
+switchFunctionTypes i1 i2 o1 o2 = check <$> termOfType (HSE.Syntax.TyFun i1 o1)
+  where db      = [(i1, i2), (o1, o2)]
+        check f = let [Eq lhs rhs] = restoreTypes db [replaceEqTypes db (Eq f f)]
+                   in termType lhs == termType rhs
+
+regressionTypeParse = once . monadicIO $ do
+    result <- run $ parseAndReduce ex
+    assert (LB.length (encode result) > 0)
+  where ex = "{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"List Integer -> List Integer\",\"symbol\":\"reverse\"},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}}"
 
 -- Helpers
 

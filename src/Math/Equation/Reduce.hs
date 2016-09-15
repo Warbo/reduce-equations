@@ -49,23 +49,33 @@ replaceTypes eqs = let db = zip typs new
         s = HSE.Syntax.TyApp (tyCon "S")
 
 replaceEqTypes db (Eq l r) = Eq (replaceTermTypes l) (replaceTermTypes r)
-  where replaceTermTypes (C (Const a n t))  = C (Const a n (replaceInType t))
-        replaceTermTypes (V (Var t i a))    = V (Var (replaceInType t) i a)
+  where replaceTermTypes (C (Const a n t))  = C (Const a n (replace t))
+        replaceTermTypes (V (Var t i a))    = V (Var (replace t) i a)
         replaceTermTypes (App l r (Just t)) = App (replaceTermTypes l)
                                                   (replaceTermTypes r)
-                                                  (Just (replaceInType t))
+                                                  (Just (replace t))
+
+        replace = replaceInType . unwrapParens
 
         replaceInType (HSE.Syntax.TyFun i o) = HSE.Syntax.TyFun (replaceInType i)
                                                                 (replaceInType o)
-        replaceInType t                      = fromJust (lookup t db)
+        replaceInType t                      = case lookup t db of
+          Just t' -> t'
+          Nothing -> error (show t ++ " not in " ++ show db)
+
+-- Required, since 'parse (prettyPrint t)' might have TyParens which 't' doesn't
+unwrapParens (HSE.Syntax.TyFun i o) = HSE.Syntax.TyFun (unwrapParens i) (unwrapParens o)
+unwrapParens (HSE.Syntax.TyApp i o) = HSE.Syntax.TyApp (unwrapParens i) (unwrapParens o)
+unwrapParens (HSE.Syntax.TyParen t) = unwrapParens t
+unwrapParens t                      = t
 
 tyCon = HSE.Syntax.TyCon . HSE.Syntax.UnQual . HSE.Syntax.Ident
 
 allTypes :: [Equation] -> [Type]
 allTypes = filter notFunc . concatMap components . catMaybes . nub . concatMap eqTypes
   where eqTypes (Eq l r) = termTypes l ++ termTypes r
-        termTypes (App l r t) = [t] ++ termTypes l ++ termTypes r
-        termTypes t           = [termType t]
+        termTypes (App l r t) = [unwrapParens <$> t] ++ termTypes l ++ termTypes r
+        termTypes t           = [unwrapParens <$> termType t]
 
         notFunc (HSE.Syntax.TyFun _ _) = False
         notFunc _                      = True
