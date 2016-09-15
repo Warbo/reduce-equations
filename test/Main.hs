@@ -58,9 +58,9 @@ main = do
     , testProperty "Can get type of terms"        canGetTermType
     , testProperty "No trivial terms"             noTrivialTerms
     , testProperty "Equations are consistent"     eqsAreConsistent
-    ] ++ if nix then [
-        testProperty "Can prune equations"          canPruneEqs
-      ] else [])
+    ] ++ [
+      testProperty "Can prune equations"          canPruneEqs | nix
+    ])
 
 -- Tests
 
