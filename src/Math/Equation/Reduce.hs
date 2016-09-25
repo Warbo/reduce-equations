@@ -59,9 +59,9 @@ replaceEqTypes db (Eq l r) = Eq (replaceTermTypes l) (replaceTermTypes r)
 
         replaceInType (HSE.Syntax.TyFun i o) = HSE.Syntax.TyFun (replaceInType i)
                                                                 (replaceInType o)
-        replaceInType t                      = case lookup t db of
-          Just t' -> t'
-          Nothing -> error (show t ++ " not in " ++ show db)
+        replaceInType t                      = fromMaybe
+          (error (show t ++ " not in " ++ show db))
+          (lookup t db)
 
 -- Required, since 'parse (prettyPrint t)' might have TyParens which 't' doesn't
 unwrapParens (HSE.Syntax.TyFun i o) = HSE.Syntax.TyFun (unwrapParens i) (unwrapParens o)
