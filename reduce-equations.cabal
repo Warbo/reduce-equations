@@ -30,7 +30,7 @@ library
                      , quickspec
                      , transformers
                      , mtl
-                     , nix-eval
+                     , nix-eval >= 0.3.2.10
                      , haskell-src-exts
                      , stringable
                      , text

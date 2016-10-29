@@ -46,7 +46,7 @@ replaceTypes eqs = let db = zip typs new
   where typs = allTypes eqs
         new  = iterate s z
         z = tyCon "Z"
-        s = HSE.Syntax.TyApp (tyCon "S")
+        s = HSE.Syntax.TyApp () (tyCon "S")
 
 replaceEqTypes db (Eq l r) = Eq (replaceTermTypes l) (replaceTermTypes r)
   where replaceTermTypes (C (Const a n t))  = C (Const a n (replace t))
@@ -57,19 +57,25 @@ replaceEqTypes db (Eq l r) = Eq (replaceTermTypes l) (replaceTermTypes r)
 
         replace = replaceInType . unwrapParens
 
-        replaceInType (HSE.Syntax.TyFun i o) = HSE.Syntax.TyFun (replaceInType i)
-                                                                (replaceInType o)
+        replaceInType (HSE.Syntax.TyFun _ i o) = HSE.Syntax.TyFun
+                                                   ()
+                                                   (replaceInType i)
+                                                   (replaceInType o)
         replaceInType t                      = fromMaybe
           (error (show t ++ " not in " ++ show db))
           (lookup t db)
 
 -- Required, since 'parse (prettyPrint t)' might have TyParens which 't' doesn't
-unwrapParens (HSE.Syntax.TyFun i o) = HSE.Syntax.TyFun (unwrapParens i) (unwrapParens o)
-unwrapParens (HSE.Syntax.TyApp i o) = HSE.Syntax.TyApp (unwrapParens i) (unwrapParens o)
-unwrapParens (HSE.Syntax.TyParen t) = unwrapParens t
-unwrapParens t                      = t
+unwrapParens (HSE.Syntax.TyFun _ i o) = HSE.Syntax.TyFun ()
+                                                         (unwrapParens i)
+                                                         (unwrapParens o)
+unwrapParens (HSE.Syntax.TyApp _ i o) = HSE.Syntax.TyApp ()
+                                                         (unwrapParens i)
+                                                         (unwrapParens o)
+unwrapParens (HSE.Syntax.TyParen _ t) = unwrapParens t
+unwrapParens t                        = t
 
-tyCon = HSE.Syntax.TyCon . HSE.Syntax.UnQual . HSE.Syntax.Ident
+tyCon = HSE.Syntax.TyCon () . HSE.Syntax.UnQual () . HSE.Syntax.Ident ()
 
 allTypes :: [Equation] -> [Type]
 allTypes = filter notFunc . concatMap components . catMaybes . nub . concatMap eqTypes
@@ -77,11 +83,11 @@ allTypes = filter notFunc . concatMap components . catMaybes . nub . concatMap e
         termTypes (App l r t) = [unwrapParens <$> t] ++ termTypes l ++ termTypes r
         termTypes t           = [unwrapParens <$> termType t]
 
-        notFunc (HSE.Syntax.TyFun _ _) = False
-        notFunc _                      = True
+        notFunc (HSE.Syntax.TyFun _ _ _) = False
+        notFunc _                        = True
 
-        components (HSE.Syntax.TyFun i o) = components i ++ components o
-        components t                      = [t]
+        components (HSE.Syntax.TyFun _ i o) = components i ++ components o
+        components t                        = [t]
 
 replaceVars db = restoreTypes db . parseLines
 

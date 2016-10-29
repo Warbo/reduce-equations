@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings, PartialTypeSignatures, ScopedTypeVariables, TypeSynonymInstances #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings, PartialTypeSignatures, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
 
 module Main where
 
@@ -10,6 +10,7 @@ import           Data.List
 import           Data.Maybe
 import qualified Data.Sequence                as Seq
 import qualified Data.Stringable              as S
+import qualified Data.String                  as DS
 import           Language.Eval.Internal
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Math.Equation.Internal
@@ -176,22 +177,31 @@ sigConstsUniqueIndices' s (Const a (Name n') t) = testEval mkExpr hasConsts
         consts = [Const a (Name (n ++ show i)) t | i <- [0..10]]
         sig    = withConsts consts s
 
+sigVarsUniqueIndices :: Sig -> Var -> Property
 sigVarsUniqueIndices s v = let (mkExpr, hasVars) = sigVarsUniqueIndices' s v
                             in doOnce (testEval mkExpr hasVars)
 
 -- Use `v` to generate a bunch of `Var`s of the same type, `vars`, add them to
 -- `s` to get `sig`. Render `sig` to a QuickSpec signature, then print out its
 -- variable symbols and compare with those of `sig`.
+sigVarsUniqueIndices' :: Sig -> Var -> (() -> (TypedExpr String, _), Maybe String -> Bool)
 sigVarsUniqueIndices' s (Var t _ a) = (mkExpr, hasVars)
   where mkExpr () = let syms  = variableSymbols' $$$ render sig
                         names = (map' $$$ name') $$$ syms
                         e     = unlines' $$$ names
-                     in (e, ("vars", vars))
+                     in (e, (("vars" :: String, vars),
+                             ("sig"  :: String, sig)))
         hasVars Nothing    = error "Failed to evaluate"
-        hasVars (Just out) = setEq (map Name (lines out))
+        hasVars (Just out) = setEq (map Name (readVars out))
                                    (map varName (sigVars sig))
         vars = [Var t i a | i <- [0..10]]
         sig  = withVars vars s
+
+-- Some vars get split over multiple lines
+readVars s = accumulate [] (lines s)
+  where accumulate (v:vs) (l@(' ':_):ls) = accumulate ((v ++ l):vs) ls
+        accumulate    vs  (l        :ls) = accumulate       (l :vs) ls
+        accumulate    vs  []             = vs
 
 noClassesFromEmptyEqs = null (classesFromEqs [])
 
@@ -427,7 +437,7 @@ noTrivialTerms t = forAll (termOfType t) (not . trivial)
 eqsAreConsistent (Eqs eqs) = consistentEqs eqs
 
 -- Given 'i' and 'o', we should be able to replace 'i -> o'
-switchFunctionTypes i1 i2 o1 o2 = check <$> termOfType (HSE.Syntax.TyFun i1 o1)
+switchFunctionTypes i1 i2 o1 o2 = check <$> termOfType (HSE.Syntax.TyFun () i1 o1)
   where db      = [(i1, i2), (o1, o2)]
         check f = let [Eq lhs rhs] = restoreTypes db [replaceEqTypes db (Eq f f)]
                    in termType lhs == termType rhs
@@ -785,8 +795,8 @@ directEq eqs x = x Seq.<| Seq.filter direct terms
         direct a         = Eq x a `elem` eqs || Eq a x `elem` eqs
 
 app l r = case termType l of
-    Just (HSE.Syntax.TyFun _ o) -> App l r (Just o)
-    _                           -> x
+    Just (HSE.Syntax.TyFun _ _ o) -> App l r (Just o)
+    _                             -> x
   where [Eq x _] = setAllTypes [Eq (App l r Nothing)
                                    (App l r Nothing)]
 
@@ -794,4 +804,4 @@ iterable ty = do t <- termOfType ty
                  v <- termOfType (tyFun ty ty)
                  return (t, v)
 
-tyFun = HSE.Syntax.TyFun
+tyFun = HSE.Syntax.TyFun ()

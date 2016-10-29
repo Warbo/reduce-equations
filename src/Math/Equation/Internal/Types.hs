@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TypeSynonymInstances #-}
+{-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
 
 module Math.Equation.Internal.Types where
 
@@ -88,8 +88,8 @@ instance FromJSON Var where
     return (Var t i (Arity (countArity t)))
   parseJSON _          = mzero
 
-countArity (HSE.Syntax.TyFun i o) = 1 + countArity o
-countArity _                      = 0
+countArity (HSE.Syntax.TyFun _ i o) = 1 + countArity o
+countArity _                        = 0
 
 doCount haystack needle = T.count (T.pack needle) (T.pack haystack)
 
@@ -108,16 +108,19 @@ instance FromJSON Const where
     return (Const (Arity (countArity t)) s t)
   parseJSON _          = mzero
 
-type Type = HSE.Syntax.Type
+type Type = HSE.Syntax.Type ()
 
 instance ToJSON Type where
   toJSON = String . fromString . HSE.Pretty.prettyPrint
 
 instance FromJSON Type where
   parseJSON (String s) = case HSE.Parser.parseType (toString s) of
-    HSE.Parser.ParseOk t -> return t
+    HSE.Parser.ParseOk t -> return (stripLoc t)
     _                    -> mzero
   parseJSON _          =    mzero
+
+stripLoc :: HSE.Syntax.Type a -> Type
+stripLoc = fmap (const ())
 
 data Name = Name String deriving (Show, Eq)
 
@@ -200,7 +203,11 @@ sigVars (Sig cs vs) = vs
 varName :: Var -> Name
 varName (Var t i a) = Name ("(var, " ++ typeName t ++ ", " ++ show i ++ ")")
 
-typeName = HSE.Pretty.prettyPrint
+typeName = fixUp . HSE.Pretty.prettyPrint
+  where fixUp = collapseSpace . filter (/= '\n')
+        collapseSpace (' ':' ':s) = collapseSpace (' ':s)
+        collapseSpace       (c:s) = c : collapseSpace s
+        collapseSpace          "" = ""
 
 varArity (Var t i a) = a
 
@@ -236,8 +243,8 @@ setForEq (Eq l r) = Eq (setForTerm l) (setForTerm r)
           let l' = setForTerm l
               r' = setForTerm r
            in case termType' l' of
-                HSE.Syntax.TyFun _ o -> App l' r' (Just o)
-                x                    -> error ("Expected function type, got " ++ show x)
+                HSE.Syntax.TyFun _ _ o -> App l' r' (Just o)
+                x                      -> error ("Expected function type, got " ++ show x)
 
 asList' :: [Expr] -> Expr
 asList' []     = "[]"
