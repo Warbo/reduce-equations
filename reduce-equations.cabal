@@ -26,12 +26,14 @@ library
   build-depends:       base >=4.8 && <4.9
                      , aeson
                      , bytestring
+                     , containers
                      , QuickCheck
                      , quickspec
                      , transformers
                      , mtl
                      , nix-eval >= 0.3.2.10
-                     , haskell-src-exts
+                     , mlspec-helper
+                     , haskell-src-exts >= 1.18.2
                      , stringable
                      , text
   hs-source-dirs:      src
@@ -58,7 +60,7 @@ test-suite test
                      , directory
                      , aeson
                      , bytestring
-                     , haskell-src-exts
+                     , haskell-src-exts >= 1.18.2
                      , nix-eval
                      , stringable
                      , containers
