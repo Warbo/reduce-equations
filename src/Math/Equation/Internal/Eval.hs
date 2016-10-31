@@ -16,6 +16,7 @@ module Math.Equation.Internal.Eval where
 import Data.Dynamic
 import Data.List
 import Data.Maybe
+import qualified Data.Map
 import Data.String
 import Data.Typeable
 import Language.Eval.Internal
@@ -34,8 +35,10 @@ import qualified Test.QuickSpec.Main
 import qualified Test.QuickSpec.Signature
 import qualified Test.QuickSpec.Term
 import qualified Test.QuickSpec.TestTree
+import qualified Test.QuickSpec.Utils.Typeable
 import qualified Test.QuickSpec.Utils.Typed
 import qualified Test.QuickSpec.Utils.TypeMap
+import qualified Test.QuickSpec.Utils.TypeRel (TypeRel, singleton)
 import qualified Test.QuickSpec.Reasoning.NaiveEquationalReasoning
 import qualified Test.QuickSpec.Equation
 
@@ -121,16 +124,80 @@ renderWithSig (WS (TE e)) sig = TE (e {
   where TE s = render sig
 
 renderWithSigN :: (Test.QuickSpec.Signature.Sig -> a) -> Sig -> a
-renderWithSigN e sig = e sig'
-  where sig' = sigToQS sig
-        sigToQS (Sig cs vs) = mappend (renderQSConsts cs) (renderQSVars vs)
+renderWithSigN e (Sig cs vs) = e sig'
+  where sig' = mappend (renderQSConsts cs) (renderQSVars vs)
 
 renderQSConsts = foldr (mappend . renderQSConst) mempty
 
 renderQSVars   = undefined
 
+-- Conceptually the same as `fun0`, `fun1`, etc. but we have to bypass those
+-- wrappers as we need to supply our own TypeRep
 renderQSConst :: Const -> Test.QuickSpec.Signature.Sig
-renderQSConst = undefined
+renderQSConst (Const (Arity a) (Name n) t) = constantSig
+  where rawTyRep = getRep t
+
+        tyrep = (Test.QuickSpec.Utils.Typeable.typeOf [()]) {
+            Test.QuickSpec.Utils.Typeable.unTypeRep = rawTyRep
+          }
+
+        typerelsingleton :: Typeable a => Test.QuickSpec.Term.Constant a -> Test.QuickSpec.Utils.TypeRel.TypeRel Test.QuickSpec.Term.Constant
+        typerelsingleton x  = typeMapfromList (Test.QuickSpec.Utils.Typed.O [x])
+
+        typeMapfromList :: Typeable a => f a -> Test.QuickSpec.Utils.TypeMap.TypeMap f
+        typeMapfromList x = Data.Map.fromList [ (tyrep, Test.QuickSpec.Utils.Typed.Some x) ]
+
+        constantSig = case getVal rawTyRep of
+          MkHT x -> Test.QuickSpec.Signature.emptySig {
+            Test.QuickSpec.Signature.constants = typerelsingleton
+              (Test.QuickSpec.Term.Constant
+                (Test.QuickSpec.Term.Atom
+                  (Test.QuickSpec.Term.Symbol 0 n a False False tyrep)
+                  x))  -- Pruning equations should force any values
+            }
+
+type ListOfConstants = Test.QuickSpec.Utils.Typed.O
+  Test.QuickSpec.Utils.Typed.List
+  Test.QuickSpec.Term.Constant
+
+-- Turn a normalised Type (e.g. `S (S Z) -> S Z`) into a TypeRep
+getRep :: Type -> TypeRep
+getRep t = case t of
+    Language.Haskell.Exts.Syntax.TyFun _ l r -> mkFunTy (getRep l) (getRep r)
+
+    Language.Haskell.Exts.Syntax.TyApp _
+      (Language.Haskell.Exts.Syntax.TyCon _
+        (Language.Haskell.Exts.Syntax.UnQual _
+         (Language.Haskell.Exts.Syntax.Ident _ "S")))
+      x -> mkTyConApp sCon [getRep x]
+
+    Language.Haskell.Exts.Syntax.TyCon _
+      (Language.Haskell.Exts.Syntax.UnQual _
+        (Language.Haskell.Exts.Syntax.Ident _ "Z")) -> typeRep [Z ()]
+
+  where sCon = typeRepTyCon (typeRep [S (Z ())])  -- The Z gets discarded
+
+-- Construct a value of some normalised type. We use an existential so that
+-- getVal can return a (wrapped up) value of the correct type. Since we should
+-- only need these values in order to match up their TypeReps, this should be
+-- sufficient.
+getVal :: TypeRep -> HasType
+getVal tr = case () of
+    _ | thisCon == zCon   -> MkHT (Z ())
+    _ | thisCon == sCon   -> case getVal (head (typeRepArgs tr)) of
+                                  MkHT x -> MkHT (S x)
+    _ | thisCon == funCon -> case map getVal (typeRepArgs tr) of
+                                  [MkHT i, MkHT o] -> MkHT (\x -> case asTypeOf i x of
+                                                                       _ -> o)
+  where thisCon = typeRepTyCon tr
+        funCon  = typeRepTyCon (typeRep [not])  -- Simple monomorphic function
+        zCon    = typeRepTyCon (typeRep [Z ()])
+        sCon    = typeRepTyCon (typeRep [S (Z ())])  -- The Z gets discarded
+
+data HasType = forall a. Typeable a => MkHT a
+
+instance Show HasType where
+  show (MkHT x) = "HasType(" ++ show (typeRep [x]) ++ ")"
 
 {-
 data (Ord a, Ord b, Ord c, Ord d, Ord e, Ord f,
@@ -153,11 +220,12 @@ tsToV  TsZ      = Z ()
 tsToV (TsS x)   = S (tsToV x)
 tsToV (TsF f x) = \a -> tsToV x
 
-
-vToD :: Type -> (String -> QSSig, )
-vToD (Language.Haskell.Exts.Syntax.TyFun x y) = TsF (vToD x) (vToD y)
-vToD (Language.Haskell.Exts.Syntax.TyApp s x) = toDyn TsS (vToD x)
-vToD _                                        = toDyn Z
+{-
+--vToD :: Type -> (String -> QSSig, _)
+vToD (Language.Haskell.Exts.Syntax.TyFun _ x y) = TsF (vToD x) (vToD y)
+vToD (Language.Haskell.Exts.Syntax.TyApp _ s x) = toDyn TsS (vToD x)
+vToD _                                          = toDyn Z
+-}
 
 {-
 f0 = Test.QuickSpec.Signature.fun0

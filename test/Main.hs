@@ -61,12 +61,21 @@ main = do
     , testProperty "No trivial terms"             noTrivialTerms
     , testProperty "Equations are consistent"     eqsAreConsistent
     , testProperty "Switch function types"        switchFunctionTypes
+
+    , testProperty "New reduce" newReduce
     ] ++ if nix then [
       testProperty "Can prune equations"          canPruneEqs,
       testProperty "Type parsing regression"      regressionTypeParse
     ] else [])
 
 -- Tests
+
+newReduce = once $ monadicIO $ do
+  eqs    <- run $ generate arbitrary
+  result <- run $ reductionN eqs
+  monitor . counterexample . show $ (("eqs",    eqs),
+                                     ("result", result))
+  assert False
 
 canParseEquations = all try [
       "{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}}}",
@@ -124,16 +133,14 @@ constantsAdded cs s = case withConsts cs s of
 variablesAdded vs s = case withVars vs s of
   Sig _ vs' -> all (`elem` vs') vs
 
-sigsRender = run
-  where run      = testEval mkExpr (== Just "True")
-        mkExpr s = let e = show' $$$ (f $$$ render s)
+sigsRender = testEval mkExpr (== Just "True")
+  where mkExpr s = let e = show' $$$ (f $$$ render s)
                        f :: TypedExpr (QSSig -> Bool)
                        f = TE $ withQS "(const True :: Test.QuickSpec.Sig -> Bool)"
                     in (e, ("f", f))
 
-sigsHaveConsts = run
-  where run = testEval mkExpr (== Just "True")
-        mkExpr (s, cs) = let e            = show' $$$ (hasConsts $$$ render s')
+sigsHaveConsts = testEval mkExpr (== Just "True")
+  where mkExpr (s, cs) = let e            = show' $$$ (hasConsts $$$ render s')
                              s'           = withConsts cs s
 
                              hasConsts :: TypedExpr (QSSig -> Bool)
@@ -146,9 +153,8 @@ sigsHaveConsts = run
                              dbg          = ("names", names)
                           in (e, dbg)
 
-sigsHaveVars = run
-  where run = testEval mkExpr (== Just "True")
-        mkExpr (s, vs) = let e          = show' $$$ (hasVars $$$ render s')
+sigsHaveVars = testEval mkExpr (== Just "True")
+  where mkExpr (s, vs) = let e          = show' $$$ (hasVars $$$ render s')
                              s'         = withVars vs s
 
                              hasVars :: TypedExpr (QSSig -> Bool)
@@ -177,20 +183,21 @@ sigConstsUniqueIndices' s (Const a (Name n') t) = testEval mkExpr hasConsts
         consts = [Const a (Name (n ++ show i)) t | i <- [0..10]]
         sig    = withConsts consts s
 
-sigVarsUniqueIndices :: Sig -> Var -> Property
-sigVarsUniqueIndices s v = let (mkExpr, hasVars) = sigVarsUniqueIndices' s v
-                            in doOnce (testEval mkExpr hasVars)
+sigVarsUniqueIndices :: Property
+sigVarsUniqueIndices = once (property sigVarsUniqueIndices')
 
 -- Use `v` to generate a bunch of `Var`s of the same type, `vars`, add them to
 -- `s` to get `sig`. Render `sig` to a QuickSpec signature, then print out its
 -- variable symbols and compare with those of `sig`.
-sigVarsUniqueIndices' :: Sig -> Var -> (() -> (TypedExpr String, _), Maybe String -> Bool)
-sigVarsUniqueIndices' s (Var t _ a) = (mkExpr, hasVars)
-  where mkExpr () = let syms  = variableSymbols' $$$ render sig
+sigVarsUniqueIndices' :: Sig -> Var -> Property
+sigVarsUniqueIndices' s (Var t _ a) = testEval mkExpr hasVars
+  where mkExpr :: () -> (TypedExpr String, _)
+        mkExpr () = let syms  = variableSymbols' $$$ render sig
                         names = (map' $$$ name') $$$ syms
                         e     = unlines' $$$ names
                      in (e, (("vars" :: String, vars),
                              ("sig"  :: String, sig)))
+        hasVars :: Maybe String -> Bool
         hasVars Nothing    = error "Failed to evaluate"
         hasVars (Just out) = setEq (map Name (readVars out))
                                    (map varName (sigVars sig))
@@ -462,14 +469,14 @@ putTrue  = TE $ "putStr" $$ asString "True"
 --   The type `b` is for any extra debug output to include in case of failure.
 testEval :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr String, b))
                                           -> (Maybe String -> Bool)
-                                          -> (a -> Property)
+                                          -> Property
 testEval = testEval' (\(TE e) -> eval e)
 
 -- | Check that the output of the generated `IO` actions satifies the given
 --   predicate. `b` is for extra debug output to include in case of failure.
 testExec :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr (IO e), b))
                                            -> (Maybe String -> Bool)
-                                           -> (a -> Property)
+                                           -> Property
 testExec = testEval' exec
 
 -- | Takes an expression-evaluating function, an expression-generating function
@@ -477,17 +484,18 @@ testExec = testEval' exec
 --   output-checking function and tests whether the output of evaluating the
 --   generated expressions passes the checker.
 testEval' :: (Arbitrary a, Show a, Show b) => (TypedExpr e -> IO (Maybe String))
-                                            -> (a -> (TypedExpr e, b))
-                                            -> (Maybe String -> Bool)
-                                            -> (a -> Property)
-testEval' evl mkExpr expect = {-forAll (resize 10 arbitrary)-} go
-  where go arg = once $ monadicIO $ do
-                   let (e, dbg) = mkExpr arg
-                   result <- run (evl (indent e))
-                   monitor . counterexample . show $ (("expr",   e),
-                                                      ("result", result),
-                                                      ("debug",  dbg))
-                   assert (expect result)
+                                           -> (a -> (TypedExpr e, b))
+                                           -> (Maybe String -> Bool)
+                                           -> Property
+testEval' evl mkExpr expect = once $ monadicIO $ do
+  arg <- run (generate arbitrary)
+  monitor . counterexample . show $ ("arg", arg)
+  let (e, dbg) = mkExpr arg
+  result <- run (evl (indent e))
+  monitor . counterexample . show $ (("expr",   e),
+                                     ("result", result),
+                                     ("debug",  dbg))
+  assert (expect result)
 
 indent (TE e) = TE (withPkgs ["hindent"] e)
 

@@ -28,6 +28,11 @@ reduction eqs = do
        Nothing -> error "Failed to reduce given input"
        Just o  -> return (replaceVars db (S.fromString o))
 
+reductionN :: [Equation] -> IO [Equation]
+reductionN eqs = do
+  let (db, eqs') = replaceTypes eqs
+  o <- pruneEqsN eqs'
+  return (replaceVars db (S.fromString o))
 
 parseLines :: BS.ByteString -> [Equation]
 parseLines s = map (setForEq . parse) eqLines
