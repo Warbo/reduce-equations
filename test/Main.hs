@@ -11,6 +11,7 @@ import           Data.Maybe
 import qualified Data.Sequence                as Seq
 import qualified Data.Stringable              as S
 import qualified Data.String                  as DS
+import           Data.Text.Encoding
 import           Language.Eval.Internal
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Math.Equation.Internal
@@ -70,12 +71,51 @@ main = do
 
 -- Tests
 
-newReduce = once $ monadicIO $ do
-  eqs    <- run $ generate arbitrary
+genNormalisedVar = do
+  eqs <- arbitrary
+  let (_, eqs') = replaceTypes eqs
+      Sig _ vs  = sigFromEqs eqs'
+  case vs of
+       []  -> discard
+       v:_ -> return v
+
+canMakeVars = do
+  v <- genNormalisedVar
+  return True
+
+canMakeQSSigs = do
+  v <- genNormalisedVar
+  let sig = renderQSVar v
+  return (length (show sig) > 0)
+
+lookupVars = once $ do
+  eqs <- genEqsWithVars
+  let Sig _ vs  = sigFromEqs eqs'
+      (_, eqs') = replaceTypes eqs
+  v <- elements vs
+  let expectName = unName (varName v)
+      sig        = renderQSVar v
+      symbol     = sigToSymN (V v) sig
+      foundName  = Test.QuickSpec.Term.name symbol
+  return (expectName == foundName)
+
+genEqsWithVars = arbitrary `suchThat` hasVars
+  where hasVars eqs = case sigFromEqs eqs of
+          Sig _ [] -> False
+          _        -> True
+
+justPrune = once $ monadicIO $ do
+    eqs <- run $ generate arbitrary
+    let (_, eqs') = replaceTypes eqs
+    monitor (counterexample (show eqs'))
+    o   <- run $ pruneEqsN eqs'
+    assert $ length o >= 0
+
+newReduce eqs = once $ monadicIO $ do
   result <- run $ reductionN eqs
-  monitor . counterexample . show $ (("eqs",    eqs),
-                                     ("result", result))
-  assert False
+  --monitor . counterexample . show $ (("eqs",    eqs),
+  --                                   ("result", result))
+  assert (length (show result) > 0)
 
 canParseEquations = all try [
       "{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}}}",
@@ -746,7 +786,15 @@ instance Arbitrary Type where
   arbitrary = sized sizedType
 
 instance Arbitrary Name where
-  arbitrary = Name <$> listOf1 (arbitrary `suchThat` isAlpha)
+  arbitrary = Name <$> listOf1 (arbitrary `suchThat` isAlpha `suchThat` isAscii) `suchThat` valid
+    where valid s = let t = S.fromString s
+                        b = S.fromString s
+                     in s == S.toString b   &&
+                        s == S.toString t   &&
+                        b == S.fromString s &&
+                        b == encodeUtf8 t   &&
+                        t == S.fromString s &&
+                        t == decodeUtf8 b
 
   shrink (Name x) = let suffices = tail (tails x)
                         nonEmpty = filter (not . null) suffices

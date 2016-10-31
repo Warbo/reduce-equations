@@ -268,3 +268,5 @@ termArity :: Term -> Arity
 termArity (C c)       = constArity c
 termArity (V v)       = varArity v
 termArity (App l r _) = termArity l - 1
+
+unName (Name n) = n

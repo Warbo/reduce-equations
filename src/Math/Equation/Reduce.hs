@@ -42,8 +42,9 @@ parseLines s = map (setForEq . parse) eqLines
 
 
 parse :: BS.ByteString -> Equation
-parse l = fromMaybe (error ("Couldn't parse line: " ++ S.toString l))
-                    (decode l)
+parse l = case eitherDecode l of
+  Left err -> error ("Couldn't parse line: " ++ S.toString l ++ ", " ++ err)
+  Right eq -> eq
 
 replaceTypes :: [Equation] -> ([(Type, Type)], [Equation])
 replaceTypes eqs = let db = zip typs new
