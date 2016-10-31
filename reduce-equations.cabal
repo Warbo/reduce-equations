@@ -64,6 +64,7 @@ test-suite test
                      , nix-eval
                      , stringable
                      , containers
-                     , QuickCheck
+                     , QuickCheck == 2.8.2
+                     , text
                      , tasty >= 0.7
                      , tasty-quickcheck
