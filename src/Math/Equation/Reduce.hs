@@ -16,10 +16,14 @@ import           Math.Equation.Internal.Types
 
 doReduce = BS.getContents >>= parseAndReduce >>= showEqs
 
+doReduceN = BS.getContents >>= parseAndReduceN >>= showEqs
+
 showEqs = mapM_ (BS.putStrLn . encode)
 
 parseAndReduce :: BS.ByteString -> IO [Equation]
 parseAndReduce s = reduction (parseLines s)
+
+parseAndReduceN s = reductionN (parseLines s)
 
 reduction eqs = do
   let (db, eqs') = replaceTypes eqs
@@ -31,7 +35,7 @@ reduction eqs = do
 reductionN :: [Equation] -> IO [Equation]
 reductionN eqs = do
   let (db, eqs') = replaceTypes eqs
-  o <- pruneEqsN eqs'
+      o = pruneEqsN eqs'
   return (replaceVars db (S.fromString o))
 
 parseLines :: BS.ByteString -> [Equation]

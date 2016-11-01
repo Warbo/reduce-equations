@@ -20,64 +20,67 @@ import           System.Directory
 import           System.IO.Unsafe
 import           Test.QuickCheck
 import           Test.QuickCheck.Monadic
+import qualified Test.QuickSpec.Signature
 import qualified Test.QuickSpec.Term
 import           Test.Tasty            (defaultMain, testGroup, localOption)
 import           Test.Tasty.QuickCheck
 
-main = do
-  nix <- haveNix
-  defaultMain $ testGroup "All tests" ([
-      testProperty "Can parse equations"          canParseEquations
-    , testProperty "Can parse terms"              canParseTerms
-    , testProperty "Can parse variables"          canParseVars
-    , testProperty "Can parse constants"          canParseConsts
-    , testProperty "Can parse examples"           canParseExamples
-    , testProperty "Can evaluate examples"        canEvalExamples
-    , testProperty "Can make example signature"   canMakeSignature
-    , testProperty "Constants added"              constantsAdded
-    , testProperty "Variables added"              variablesAdded
-    , testProperty "Sigs render"                  sigsRender
-    , testProperty "Sigs have constants"          sigsHaveConsts
-    , testProperty "Sigs have variables"          sigsHaveVars
-    , testProperty "Constants are distinct"       sigConstsUniqueIndices
-    , testProperty "Variables are distinct"       sigVarsUniqueIndices
-    , testProperty "Can find closure of term"     canFindClosure
-    , testProperty "No classes without equations" noClassesFromEmptyEqs
-    , testProperty "Equation induces a class"     oneClassFromEq
-    , testProperty "Classes contain given terms"  classesHaveTerms
-    , testProperty "Equal terms in same class"    eqPartsAppearInSameClass
-    , testProperty "Terms appear in one class"    classesHaveNoDupes
-    , testProperty "Class elements are equal"     classElementsAreEqual
-    , testProperty "Non-equal elements separate"  nonEqualElementsSeparate
-    , testProperty "Classes have one arity"       classHasSameArity
-    , testProperty "Class length more than one"   classesNotSingletons
-    , testProperty "Can get classes from sig"     canGetClassesFromEqs
-    , testProperty "Can get sig from equations"   canGetSigFromEqs
-    , testProperty "Sig has equation variables"   eqSigHasVars
-    , testProperty "Sig has equation constants"   eqSigHasConsts
-    , testProperty "Equations have one arity"     equationsHaveSameArity
-    , testProperty "Can render equations"         canRenderEqs
-    , testProperty "Expression types match up"    checkEvalTypes
-    , testProperty "Can get type of terms"        canGetTermType
-    , testProperty "No trivial terms"             noTrivialTerms
-    , testProperty "Equations are consistent"     eqsAreConsistent
-    , testProperty "Switch function types"        switchFunctionTypes
-
-    , testProperty "New reduce" newReduce
-    ] ++ if nix then [
-      testProperty "Can prune equations"          canPruneEqs,
-      testProperty "Type parsing regression"      regressionTypeParse
-    ] else [])
+main = defaultMain $ testGroup "All tests" [
+    testProperty "Can parse equations"          canParseEquations
+  , testProperty "Can parse terms"              canParseTerms
+  , testProperty "Can parse variables"          canParseVars
+  , testProperty "Can parse constants"          canParseConsts
+  , testProperty "Can parse examples"           canParseExamples
+  , testProperty "Can evaluate examples"        canEvalExamples
+  , testProperty "Can make example signature"   canMakeSignature
+  , testProperty "Constants added"              constantsAdded
+  , testProperty "Variables added"              variablesAdded
+  , testProperty "Sigs render"                  sigsRender
+  , testProperty "Sigs have constants"          sigsHaveConsts
+  , testProperty "Sigs have variables"          sigsHaveVars
+  , testProperty "Constants are distinct"       sigConstsUniqueIndices
+  , testProperty "Variables are distinct"       sigVarsUniqueIndices
+  , testProperty "Can find closure of term"     canFindClosure
+  , testProperty "No classes without equations" noClassesFromEmptyEqs
+  , testProperty "Equation induces a class"     oneClassFromEq
+  , testProperty "Classes contain given terms"  classesHaveTerms
+  , testProperty "Equal terms in same class"    eqPartsAppearInSameClass
+  , testProperty "Terms appear in one class"    classesHaveNoDupes
+  , testProperty "Class elements are equal"     classElementsAreEqual
+  , testProperty "Non-equal elements separate"  nonEqualElementsSeparate
+  , testProperty "Classes have one arity"       classHasSameArity
+  , testProperty "Class length more than one"   classesNotSingletons
+  , testProperty "Can get classes from sig"     canGetClassesFromEqs
+  , testProperty "Can get sig from equations"   canGetSigFromEqs
+  , testProperty "Sig has equation variables"   eqSigHasVars
+  , testProperty "Sig has equation constants"   eqSigHasConsts
+  , testProperty "Equations have one arity"     equationsHaveSameArity
+  , testProperty "Can render equations"         canRenderEqs
+  , testProperty "Can get type of terms"        canGetTermType
+  , testProperty "No trivial terms"             noTrivialTerms
+  , testProperty "Equations are consistent"     eqsAreConsistent
+  , testProperty "Switch function types"        switchFunctionTypes
+  , testProperty "Can generate eq variables"    canMakeVars
+  , testProperty "Can generate var QS sigs"     canMakeQSSigs
+  , testProperty "Can find vars in sig"         lookupVars
+  , testProperty "Can prune"                    justPrune
+  , testProperty "New reduce"                   newReduce
+  , testProperty "Can prune equations"          canPruneEqs
+  , testProperty "Type parsing regression"      regressionTypeParse
+  ]
 
 -- Tests
 
 genNormalisedVar = do
+  eqs' <- genNormalisedEqs
+  case sigFromEqs eqs' of
+       Sig _ []    -> discard
+       Sig _ (v:_) -> return v
+
+genNormalisedEqs = do
   eqs <- arbitrary
   let (_, eqs') = replaceTypes eqs
-      Sig _ vs  = sigFromEqs eqs'
-  case vs of
-       []  -> discard
-       v:_ -> return v
+  return eqs'
 
 canMakeVars = do
   v <- genNormalisedVar
@@ -85,16 +88,16 @@ canMakeVars = do
 
 canMakeQSSigs = do
   v <- genNormalisedVar
-  let sig = renderQSVar v
+  let sig = renderQSVars [v]
   return (length (show sig) > 0)
 
 lookupVars = once $ do
-  eqs <- genEqsWithVars
+  eqs <- resize 42 genEqsWithVars
   let Sig _ vs  = sigFromEqs eqs'
       (_, eqs') = replaceTypes eqs
   v <- elements vs
   let expectName = unName (varName v)
-      sig        = renderQSVar v
+      sig        = renderQSVars [v]
       symbol     = sigToSymN (V v) sig
       foundName  = Test.QuickSpec.Term.name symbol
   return (expectName == foundName)
@@ -104,17 +107,17 @@ genEqsWithVars = arbitrary `suchThat` hasVars
           Sig _ [] -> False
           _        -> True
 
-justPrune = once $ monadicIO $ do
-    eqs <- run $ generate arbitrary
+justPrune = once $ do
+    eqs <- resize 20 arbitrary
     let (_, eqs') = replaceTypes eqs
-    monitor (counterexample (show eqs'))
-    o   <- run $ pruneEqsN eqs'
-    assert $ length o >= 0
+        o = pruneEqsN eqs'
+    return (length o >= 0)
 
-newReduce eqs = once $ monadicIO $ do
+newReduce = once (forAll (resize 20 arbitrary) newReduce')
+newReduce' eqs = monadicIO $ do
   result <- run $ reductionN eqs
-  --monitor . counterexample . show $ (("eqs",    eqs),
-  --                                   ("result", result))
+  monitor . counterexample . show $ (("eqs",    eqs),
+                                     ("result", result))
   assert (length (show result) > 0)
 
 canParseEquations = all try [
@@ -173,37 +176,41 @@ constantsAdded cs s = case withConsts cs s of
 variablesAdded vs s = case withVars vs s of
   Sig _ vs' -> all (`elem` vs') vs
 
-sigsRender = testEval mkExpr (== Just "True")
-  where mkExpr s = let e = show' $$$ (f $$$ render s)
-                       f :: TypedExpr (QSSig -> Bool)
-                       f = TE $ withQS "(const True :: Test.QuickSpec.Sig -> Bool)"
-                    in (e, ("f", f))
+sigsRender = once $ do
+    eqs <- resize 20 genNormalisedEqs
+    let sig = sigFromEqs eqs
+        s   = show (renderN sig :: Test.QuickSpec.Signature.Sig)
+    return (length s >= 0)
 
-sigsHaveConsts = testEval mkExpr (== Just "True")
-  where mkExpr (s, cs) = let e            = show' $$$ (hasConsts $$$ render s')
-                             s'           = withConsts cs s
+sigsHaveConsts = once $ do
+  eqs <- resize 42 genNormalisedEqs
+  let s@(Sig cs vs) = sigFromEqs eqs
+      rendered      = renderN s
+      consts        = Test.QuickSpec.Signature.constantSymbols rendered
+      names         = map constName cs
+  return (checkNames names consts)
 
-                             hasConsts :: TypedExpr (QSSig -> Bool)
-                             hasConsts    = compose' checkConsts' constantSymbols'
+sigsHaveVars = once (forAll (resize 42 genNormalisedEqs) sigsHaveVars')
+sigsHaveVars' eqs =
+  let s@(Sig _ vs) = sigFromEqs eqs
 
-                             checkConsts' :: TypedExpr ([Test.QuickSpec.Term.Symbol] -> Bool)
-                             checkConsts' = checkNames' names
+      rendered = renderN s
 
-                             names        = map constName cs
-                             dbg          = ("names", names)
-                          in (e, dbg)
+      variables = Test.QuickSpec.Signature.variableSymbols rendered
 
-sigsHaveVars = testEval mkExpr (== Just "True")
-  where mkExpr (s, vs) = let e          = show' $$$ (hasVars $$$ render s')
-                             s'         = withVars vs s
+      hasVars :: Bool
+      hasVars = checkVars variables
 
-                             hasVars :: TypedExpr (QSSig -> Bool)
-                             hasVars    = compose' checkVars' variableSymbols'
-
-                             checkVars' = checkNames' names
-                             names      = map varName vs
-                             dbg        = ("names", names)
-                          in (e, dbg)
+      checkVars  = checkNames names
+      names      = map varName vs
+      foundNames = map Test.QuickSpec.Term.name variables
+      dbg        = show (--("eqs",   eqs),
+                         --("s",     s),
+                         ("expect names", names),
+                         ("found names", foundNames)
+                         --("vs",    vs)
+                        )
+  in counterexample dbg (return hasVars :: Gen Bool)
 
 sigConstsUniqueIndices = doOnce sigConstsUniqueIndices'
 
@@ -298,7 +305,8 @@ nonEqualElementsSeparate' (t, v) = match classes expected && match expected clas
 
         match xs ys = all (\x -> any (setEq x) ys) xs
 
-classElementsAreEqual (Eqs eqs) = all elementsAreEqual classes
+classElementsAreEqual = once (forAll (resize 42 arbitrary) classElementsAreEqual')
+classElementsAreEqual' (Eqs eqs) = all elementsAreEqual classes
   where classes :: [[Term]]
         classes              = classesFromEqs eqs
 
@@ -377,96 +385,9 @@ canRenderEqs' (Eqs eqs) = run
         haveEqs Nothing  = error "Failed to eval"
         haveEqs (Just s) = length (filter ("==" `isInfixOf`) (lines s)) == length eqs
 
--- | Check whether we can convince the type-checker that various expressions
---   have the types we think they do
-checkEvalTypes = doOnce checkEvalTypes'
-
-checkEvalTypes' term = monadicIO . checkTypes $ exprs
-  where checkTypes [] = return ()
-        checkTypes ((e, t, ms):es) = do
-          out <- run . exec $ mkExpr ms (e `withType` t)
-          case out of
-               Nothing -> do dbg (("expr", e), ("type", t))
-                             assert False
-               Just "" -> assert True
-               Just s  -> dbg (("expr", e), ("type", t), ("result", s))
-          checkTypes es
-
-        mkExpr :: [Mod] -> TypedExpr a -> TypedExpr (IO ())
-        mkExpr ms e = ("const" $$$ "return ()") $$$ withMods' ms e
-
-        -- The expressions we want to check the types of
-        exprs :: [(TypedExpr a, String, [Mod])]
-        exprs = [
-
-          (unType strip', "Test.QuickSpec.Term.Expr a -> a",
-           ["Test.QuickSpec.Term"]),
-
-          (unType prune', "Context -> [Term] -> (a -> Equation) -> [a] -> [a]",
-           ["Test.QuickSpec.Term", "Test.QuickSpec.Equation",
-            "Test.QuickSpec.Reasoning.NaiveEquationalReasoning"]),
-
-          (unType id', "a -> a",
-           []),
-
-          (unType initial', "Int -> [Symbol] -> [Tagged Term] -> Context",
-           ["Test.QuickSpec.Reasoning.NaiveEquationalReasoning",
-            "Test.QuickSpec.Utils.Typed"]),
-
-          (unType maxDepth', "Sig -> Int",
-           []),
-
-          (unType symbols', "Sig -> [Symbol]",
-           []),
-
-          (unType filter', "(a -> Bool) -> [a] -> [a]",
-           []),
-
-          (unType not', "Bool -> Bool",
-           []),
-
-          (unType isUndefined', "Term -> Bool",
-           []),
-
-          (unType (sort' :: TypedExpr ([Bool] -> [Bool])), "[Bool] -> [Bool]",
-           []),
-
-          (unType append', "[a] -> [a] -> [a]",
-           []),
-
-          (unType map', "(a -> b) -> [a] -> [b]",
-           []),
-
-          (unType conTagged', "Witness -> a -> Tagged a",
-           ["Test.QuickSpec.Utils.Typed"]),
-
-          (unType conSome', "f Bool -> Some f",
-           ["Data.Typeable"]),
-
-          (unType conWitness', "a -> Witnessed a",
-           []),
-
-          (unType term', "Expr a -> Term",
-           []),
-
-          (unType univ2, "Test.QuickSpec.Term.Expr Bool -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term",
-           ["Test.QuickSpec.Term", "Test.QuickSpec.Utils.Typed",
-            "Data.Typeable"]),
-
-          (unType (map' $$$ univ2), "[Test.QuickSpec.Term.Expr Bool] -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
-           []),
-
-          (let e = termToExpr term `renderWithSig` Sig [] []
-            in unType (mkUniv2 [(cons' $$$ e) $$$ nil']),
-           "[Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]",
-           ["Test.QuickSpec.Term", "Test.QuickSpec.Utils.Typed"])
-
-          ]
-
-canPruneEqs = doOnce canPruneEqs'
-
+canPruneEqs = once (forAll (resize 20 arbitrary) canPruneEqs')
 canPruneEqs' (Eqs eqs) = monadicIO $ do
-    eqs' <- run $ reduction eqs
+    eqs' <- run $ reductionN eqs
     monitor (counterexample (show (("eqs", eqs), ("eqs'", eqs'))))
     assert (expected eqs')
   where expected []     =      null eqs -- No output when no eqs
@@ -490,7 +411,7 @@ switchFunctionTypes i1 i2 o1 o2 = check <$> termOfType (HSE.Syntax.TyFun () i1 o
                    in termType lhs == termType rhs
 
 regressionTypeParse = once . monadicIO $ do
-    result <- run $ parseAndReduce ex
+    result <- run $ parseAndReduceN ex
     assert (LB.length (encode result) > 0)
   where ex = "{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"List Integer -> List Integer\",\"symbol\":\"reverse\"},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}}"
 

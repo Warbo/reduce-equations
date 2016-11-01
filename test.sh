@@ -6,16 +6,15 @@ function report {
     then
         echo "ok - $2"
     else
-        echo "$OUTPUT" 1>&2
         echo "not ok - $2"
         ERR=1
     fi
 }
 
-OUTPUT=$(cabal build 2>&1)
+cabal build
 report "$?" "cabal build"
 
-OUTPUT=$(cabal test 2>&1)
+cabal test --show-details=streaming
 report "$?" "cabal test"
 
 for F in test/data/*.json
@@ -24,7 +23,7 @@ do
                cabal run -v0 reduce-equations < "$F")
     report "$?" "Reducing $F"
 
-    OUTPUT=$(echo "$OUTPUT" | grep '^{')
+    echo "$OUTPUT" | grep '^{'
     report "$?" "Got equations from $F"
 done
 

@@ -106,11 +106,11 @@ renderTerm t = case (t, sigToSym t) of
         const = qsQual "Test.QuickSpec.Term" "Const"
         var   = qsQual "Test.QuickSpec.Term" "Var"
 
-renderTermN t sig = case (t, sigToSymN t) of
+renderTermN t sig = case (t, sigToSymN t sig) of
     (App l r _, _  ) -> case (renderTermN l sig, renderTermN r sig) of
-                             (f_l, f_r) -> \sig -> app (f_l sig) (f_r sig)
-    (C c,       f_s) -> \sig -> (const (f_s sig))
-    (V v,       f_s) -> \sig -> (var   (f_s sig))
+                             (f_l, f_r) -> app f_l f_r
+    (C c,       f_s) -> const f_s
+    (V v,       f_s) -> var   f_s
   where app   = Test.QuickSpec.Term.App
         const = Test.QuickSpec.Term.Const
         var   = Test.QuickSpec.Term.Var
@@ -126,55 +126,84 @@ renderWithSig (WS (TE e)) sig = TE (e {
   where TE s = render sig
 
 renderWithSigN :: (Test.QuickSpec.Signature.Sig -> a) -> Sig -> a
-renderWithSigN e (Sig cs vs) = e sig'
-  where sig' = mappend (renderQSConsts cs) (renderQSVars vs)
+renderWithSigN e sig = e (renderN sig)
+
+renderN (Sig cs vs) = mappend (renderQSConsts cs) (renderQSVars vs)
 
 renderQSConsts = foldr (mappend . renderQSConst) mempty
 
-renderQSVars   = foldr (mappend . renderQSVar) mempty
+renderQSVars   = foldr (mappend . renderQSVarType) mempty . collectTypes
+  where collectTypes = groupBy eqTypes . sortBy ordTypes
+        eqTypes  (Var t1 _ _) (Var t2 _ _) = t1 == t2
+        ordTypes (Var t1 _ _) (Var t2 _ _) = compare t1 t2
 
-sortVars :: [Var] -> [Var]
-sortVars = sortBy idx
-  where idx (Var t1 x _) (Var t2 y _) =
-          if t1 < t2
-             then LT
-             else if t2 < t1
-                     then GT
-                     else compare x y
 
-renderQSVar :: Var -> Test.QuickSpec.Signature.Sig
-renderQSVar v@(Var t idx (Arity a)) = extendSig t variablesSig
-  where variablesSig = case getVal (getRep t) of
-          MkHT x -> Test.QuickSpec.Signature.emptySig {
-              Test.QuickSpec.Signature.variables =
-                Data.Map.fromList [(rep, Test.QuickSpec.Utils.Typed.Some
-                                           (Test.QuickSpec.Utils.Typed.O
-                                             [Test.QuickSpec.Term.Variable {
-                                                 Test.QuickSpec.Term.unVariable = Test.QuickSpec.Term.Atom {
-                                                     Test.QuickSpec.Term.sym = Test.QuickSpec.Term.Symbol {
-                                                         Test.QuickSpec.Term.index = idx,
-                                                         Test.QuickSpec.Term.name  = unName (varName v),
-                                                         Test.QuickSpec.Term.symbolArity = a,
-                                                         Test.QuickSpec.Term.silent = False,
-                                                         Test.QuickSpec.Term.undef = False,
-                                                         Test.QuickSpec.Term.symbolType = rep
-                                                       },
-                                                     Test.QuickSpec.Term.value = Test.QuickSpec.Term.pgen (return x)
-                                                   }
-                                               }]))]
-            }
+renderQSVarType [] = Test.QuickSpec.Signature.emptySig
+renderQSVarType vs@(Var t _ (Arity a):_) = case getVal (getRep t) of
+  MkHT x -> Test.QuickSpec.Signature.variableSig [
+                Test.QuickSpec.Term.Variable
+                  (Test.QuickSpec.Term.Atom
+                    (Test.QuickSpec.Term.symbol (unName (varName v)) a x)
+                    (Test.QuickSpec.Term.pgen (return x)))
+              | v <- vs ]
+              `mappend` mconcat [ Test.QuickSpec.Signature.totalSig
+                                    (Test.QuickSpec.Term.totalGen
+                                      (Test.QuickSpec.Term.pgen (return x)))
+                                | v <- vs ]
+              `mappend` mconcat [ Test.QuickSpec.Signature.partialSig
+                                    (Test.QuickSpec.Term.partialGen
+                                      (Test.QuickSpec.Term.pgen (return x)))
+                                | v <- vs ]
+              `mappend` Test.QuickSpec.Signature.typeSig x
 
-        rep = repToQSRep (getRep t)
+renderQSVarType2 :: [Var] -> Test.QuickSpec.Signature.Sig
+renderQSVarType2 vs = extend vs variablesSig
+  where variablesSig = Test.QuickSpec.Signature.emptySig {
+                           Test.QuickSpec.Signature.variables =
+                             Data.Map.fromList (zipWith getVar vs [0..])
+                         }
 
-extendSig (Language.Haskell.Exts.Syntax.TyFun _ i o) sig =
-  case getVal (getRep o) of
-       MkHT x -> extendSig o (sig `mappend` Test.QuickSpec.Signature.ord x)
-extendSig _ sig = sig
+        getVar v@(Var t _ (Arity a)) idx =
+          let rep = repToQSRep (getRep t)
+           in case getVal (getRep t) of
+                MkHT x -> (rep, Test.QuickSpec.Utils.Typed.Some
+                                  (Test.QuickSpec.Utils.Typed.O
+                                    [Test.QuickSpec.Term.Variable {
+                                        Test.QuickSpec.Term.unVariable = Test.QuickSpec.Term.Atom {
+                                            Test.QuickSpec.Term.sym = Test.QuickSpec.Term.Symbol {
+                                                Test.QuickSpec.Term.index = idx,
+                                                Test.QuickSpec.Term.name  = unName (varName v),
+                                                Test.QuickSpec.Term.symbolArity = a,
+                                                Test.QuickSpec.Term.silent = False,
+                                                Test.QuickSpec.Term.undef = False,
+                                                Test.QuickSpec.Term.symbolType = rep
+                                              },
+                                            Test.QuickSpec.Term.value = Test.QuickSpec.Term.pgen (return x)
+                                          }
+                                      }]))
+        extend [] sig = sig
+        extend (Var t _ (Arity a):xs) sig = extend xs (extendSig t a sig)
+
+extendSig t a sig = case getVal (getRep t) of
+  MkHT x -> extendOrd t a (addArrowTypes sig t a) `mappend` Test.QuickSpec.Signature.typeSig x
+
+
+extendOrd t 0 sig = case getVal (getRep t) of
+  MkHT x -> sig `mappend` Test.QuickSpec.Signature.ord x
+extendOrd (Language.Haskell.Exts.Syntax.TyFun _ i o) a sig =
+  extendSig o (a-1) sig
+extendOrd t a sig = error ("Arity " ++ show a ++ " for non-function type " ++ show t)
+
+addArrowTypes sig t 0 = case getVal (getRep t) of
+  MkHT x -> sig `mappend` Test.QuickSpec.Signature.typeSig x
+addArrowTypes sig (Language.Haskell.Exts.Syntax.TyFun _ i o) a =
+  case getVal (getRep i) of
+    MkHT x -> Test.QuickSpec.Signature.typeSig x `mappend` addArrowTypes sig o (a-1)
 
 -- Conceptually the same as `fun0`, `fun1`, etc. but we have to bypass those
 -- wrappers as we need to supply our own TypeRep
 renderQSConst :: Const -> Test.QuickSpec.Signature.Sig
-renderQSConst (Const (Arity a) (Name n) t) = extendSig t constantSig
+renderQSConst (Const (Arity a) (Name n) t) = extendSig t a constantSig
   where rawTyRep = getRep t
 
         tyrep = repToQSRep rawTyRep
@@ -423,22 +452,21 @@ sigToSym t = WS (head' $$$ filtered)
         filtered = (filter' $$$ pred) $$$ (symbols' $$$ "givenSig")
 
 sigToSymN :: Term -> Test.QuickSpec.Signature.Sig -> Test.QuickSpec.Term.Symbol
-sigToSymN t sig = case filtered of
+sigToSymN t sig = case filter pred symbols of
                        []  -> error . show $
-                         (("Error",  "No symbol found"),
-                          ("term t", t),
-                          ("Name n", n),
-                          ("syms", symbols sig),
-                          ("sig",    sig))
+                         (("Error",   "No symbol found"),
+                          ("term t",  t),
+                          ("Name n",  n),
+                          ("symbols", symbols),
+                          ("sig",     sig))
                        x:_ -> x
   where pred x   = name x == n
         Name n   = case t of
                         C c -> constName c
                         V v -> varName   v
                         App{} -> error ("Tried to get sym for " ++ show t)
-        filtered = filter pred (symbols sig)
 
-        symbols = Test.QuickSpec.Signature.symbols
+        symbols = Test.QuickSpec.Signature.symbols sig
         name    = Test.QuickSpec.Term.name
 
 
@@ -617,6 +645,9 @@ checkNames' ns = tlam "syms" body
         syms :: TypedExpr [Test.QuickSpec.Term.Symbol]
         syms = "syms"
 
+checkNames :: [Name] -> [Test.QuickSpec.Term.Symbol] -> Bool
+checkNames ns syms = all (isIn syms) (map unName ns)
+
 isIn' :: TypedExpr ([Test.QuickSpec.Term.Symbol] -> String -> Bool)
 isIn' = tlam "syms" (tlam "n" body)
   where body = (any' $$$ f) $$$ syms
@@ -630,6 +661,10 @@ isIn' = tlam "syms" (tlam "n" body)
 
         n :: TypedExpr String
         n = "n"
+
+isIn :: [Test.QuickSpec.Term.Symbol] -> String -> Bool
+isIn syms n = any f syms
+  where f = (n ==) . Test.QuickSpec.Term.name
 
 genOf' :: Type -> TypedExpr (Test.QuickCheck.Gen.Gen a)
 genOf' t = return' $$$ undef
@@ -669,8 +704,7 @@ mkUnSomeClass (x:xs) = case (termToExpr x, mkUnSomeClass xs) of
 
 mkUnSomeClassN :: [Term] -> Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Term.Expr a]
 mkUnSomeClassN []     sig = []
-mkUnSomeClassN (x:xs) sig = case (termToExprN x, mkUnSomeClassN xs) of
-                                 (y, ys) -> y sig : ys sig
+mkUnSomeClassN (x:xs) sig = termToExprN x sig : mkUnSomeClassN xs sig
 
 
 
@@ -779,11 +813,10 @@ termToExpr t = WS (((expr' $$$ term) $$$ arity) $$$ eval)
         expr' = TE (qualified "Test.QuickSpec.Term" "Expr")
 
 termToExprN :: Term -> Test.QuickSpec.Signature.Sig -> (Test.QuickSpec.Term.Expr a)
-termToExprN t sig = expr' term arity eval
-  where expr' = Test.QuickSpec.Term.Expr
-        term  = renderTermN t sig sig
-        arity = let Arity a = termArity t in a
-        eval  = undefined
+termToExprN t sig = Test.QuickSpec.Term.Expr term arity eval
+  where term        = renderTermN t sig
+        Arity arity = termArity t
+        eval        = undefined
 
 
 
@@ -801,7 +834,7 @@ withMods' ms (TE e) = TE (withMods ms (withQS e))
 pruneEqs :: [Equation] -> IO (Maybe String)
 pruneEqs = pruneEqs' showEqsOnLines
 
-pruneEqsN :: [Equation] -> IO String
+pruneEqsN :: [Equation] -> String
 pruneEqsN eqs = pruneEqsN' showEqsOnLinesN eqs
 
 
@@ -841,8 +874,8 @@ pruneEqs' f eqs = exec main''
                            "instance Ord Z where { compare _ _ = Prelude.EQ; };",
                            "instance (Ord a) => Ord (S a) where { compare (Main.S x) (Main.S y) = Prelude.compare x y; };"]
 
-pruneEqsN' :: ((Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Equation.Equation]) -> Test.QuickSpec.Signature.Sig -> String) -> [Equation] -> IO _
-pruneEqsN' f eqs = return (renderWithSigN (f pruned) sig)
+pruneEqsN' :: ((Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Equation.Equation]) -> Test.QuickSpec.Signature.Sig -> String) -> [Equation] -> String
+pruneEqsN' f eqs = renderWithSigN (f pruned) sig
   where pruned = unSomePruneN clss
         sig    = sigFromEqs eqs
         clss   = unSomeClassesN eqs
