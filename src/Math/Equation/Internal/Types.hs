@@ -19,7 +19,11 @@ import           Text.Read  (readMaybe) -- Uses String as part of base, not Text
 -- Types to represent equations, constants, variables, etc. and functions for
 -- converting between representations
 
-data Equation = Eq Term Term deriving (Eq)
+data Equation = Eq Term Term
+
+instance Eq Equation where
+  (Eq l1 r1) == (Eq l2 r2) = (l1 == l2 && r1 == r2) ||
+                             (l1 == r2 && r1 == l2)
 
 instance ToJSON Equation where
   toJSON (Eq l r) = object [
@@ -85,7 +89,7 @@ instance FromJSON Var where
   parseJSON (Object v) = do
     t <- v .: "type"
     i <- v .: "id"
-    return (Var t i (Arity (countArity t)))
+    return (Var (unwrapParens t) i (Arity (countArity t)))
   parseJSON _          = mzero
 
 countArity (HSE.Syntax.TyFun _ i o) = 1 + countArity o
@@ -105,7 +109,7 @@ instance FromJSON Const where
   parseJSON (Object v) = do
     t <- v .: "type"
     s <- v .: "symbol"
-    return (Const (Arity (countArity t)) s t)
+    return (Const (Arity (countArity t)) s (unwrapParens t))
   parseJSON _          = mzero
 
 type Type = HSE.Syntax.Type ()
@@ -270,3 +274,30 @@ termArity (V v)       = varArity v
 termArity (App l r _) = termArity l - 1
 
 unName (Name n) = n
+
+-- Make sure we don't have one name with multiple types or arities
+consistent :: [Equation] -> Bool
+consistent [] = True
+consistent eqs = all haveOnce names
+  where db = nub (symTypes [] eqs)
+
+        symTypes acc []          = acc
+        symTypes acc (Eq l r:xs) = symTypes (constsOf l ++ constsOf r ++ acc) xs
+
+        constsOf (C (Const a n t)) = [(n, (a, t))]
+        constsOf (V _)             = []
+        constsOf (App l r _)       = constsOf l ++ constsOf r
+
+        names = map fst db
+
+        haveOnce n = Data.List.length (filter ((== n) . fst) db) == 1
+
+-- Required, since 'parse (prettyPrint t)' might have TyParens which 't' doesn't
+unwrapParens (HSE.Syntax.TyFun _ i o) = HSE.Syntax.TyFun ()
+                                                         (unwrapParens i)
+                                                         (unwrapParens o)
+unwrapParens (HSE.Syntax.TyApp _ i o) = HSE.Syntax.TyApp ()
+                                                         (unwrapParens i)
+                                                         (unwrapParens o)
+unwrapParens (HSE.Syntax.TyParen _ t) = unwrapParens t
+unwrapParens t                        = t

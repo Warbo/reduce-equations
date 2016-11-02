@@ -22,6 +22,7 @@ import Data.String
 import Data.Typeable
 import Language.Eval.Internal
 import qualified Language.Haskell.Exts.Syntax
+import qualified Language.Haskell.Exts.Parser as HSE.Parser
 import Math.Equation.Internal.Types
 import MLSpec.Helper
 import System.Environment
@@ -716,18 +717,15 @@ unSomePrune clss = WS ((((prune' $$$ arg1) $$$ arg2) $$$ id') $$$ arg3)
         arg3  = sort' $$$ mkEqs2 clss'
         clss' = map (\(WS x) -> x) clss
 
-unSomePruneN :: [Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Term.Expr Term]] -> Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Equation.Equation]
-unSomePruneN clss sig = ((((prune $ arg1) $ arg2) $ id) $ arg3)
-  where arg1  = ((initial $ (maxDepth $ sig)) $ (symbols $ sig)) $ mkUniv2N clss'
-        arg2  = (filter $ not . isUndefined) $ getTermHeadN clss'
-        arg3  = sort $ mkEqs2N clss'
-        clss' = map ($ sig) clss
-
-        symbols     = Test.QuickSpec.Signature.symbols
-        prune       = Test.QuickSpec.Main.prune
-        maxDepth    = Test.QuickSpec.Signature.maxDepth
-        initial     = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
-        isUndefined = Test.QuickSpec.Term.isUndefined
+unSomePruneN :: [[Test.QuickSpec.Term.Expr Term]] -> Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Equation.Equation]
+unSomePruneN clss sig = Test.QuickSpec.Main.prune arg1 arg2 id arg3
+  where arg1  = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
+                  (Test.QuickSpec.Signature.maxDepth sig)
+                  (Test.QuickSpec.Signature.symbols sig)
+                  (mkUniv2N clss)
+        arg2  = filter (not . Test.QuickSpec.Term.isUndefined)
+                       (getTermHeadN clss)
+        arg3  = sort (mkEqs2N clss)
 
 
 mkUniv2 :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
@@ -774,7 +772,7 @@ stripN x = undefined
 getTermHead :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Term.Term]
 getTermHead = foldr (\c -> ((cons' $$$ (term' $$$ (head' $$$ c))) $$$)) nil'
 
-getTermHeadN = foldr (\c -> (((:) $ (term $ (head $ c))) $)) []
+getTermHeadN = foldr (\c -> (term (head c) :)) []
 
 
 
@@ -834,11 +832,6 @@ withMods' ms (TE e) = TE (withMods ms (withQS e))
 pruneEqs :: [Equation] -> IO (Maybe String)
 pruneEqs = pruneEqs' showEqsOnLines
 
-pruneEqsN :: [Equation] -> String
-pruneEqsN eqs = pruneEqsN' showEqsOnLinesN eqs
-
-
-
 newtype Z = Z () deriving (Eq, Show, Typeable)
 newtype S a = S a deriving (Eq, Show, Typeable, Ord)
 instance Ord Z where compare _ _ = EQ
@@ -853,10 +846,45 @@ showEqsOnLines (WS pruned) = WS (unlines' $$$ shown')
         showEq = TE . withPkgs ["mlspec-helper"] $ qualified "MLSpec.Helper" "showEq'"
         showEq' = ("(.)" $$$ "Prelude.show") $$$ (showEq $$$ "givenSig")
 
-showEqsOnLinesN mk_pruned sig = (unlines $ shown')
-  where shown' = (map $ fullyShowEq) $ (mk_pruned sig)
-        fullyShowEq = ((.) $ show) $ (showEq' $ sig)
+showEqsOnLinesN :: [Test.QuickSpec.Equation.Equation]
+                -> [Equation]
+showEqsOnLinesN = map qsEqToEq
 
+qsEqToEq (l Test.QuickSpec.Equation.:=: r) = Eq (qsTermToTerm l) (qsTermToTerm r)
+
+qsTermToTerm t = case t of
+  Test.QuickSpec.Term.Var   s -> V   (symToVar   s)
+  Test.QuickSpec.Term.Const s -> C   (symToConst s)
+  Test.QuickSpec.Term.App l r -> App (qsTermToTerm l) (qsTermToTerm r) Nothing
+
+symToVar s =
+  let n              = Test.QuickSpec.Term.name s
+      [_, rawT, idx] = splitCommas n
+   in Var (case HSE.Parser.parseType rawT of
+             HSE.Parser.ParseOk t'        -> unwrapParens (const () <$> t')
+             HSE.Parser.ParseFailed _ err -> error (concat [
+                                    "Failed to parse var type: ",
+                                    err,
+                                    ". Type was: ",
+                                    rawT]))
+          (read (init idx) :: Int)
+          (Arity (Test.QuickSpec.Term.symbolArity s))
+symToConst s =
+  let t = HSE.Parser.parseType (show (Test.QuickSpec.Term.symbolType s))
+   in Const (Arity (Test.QuickSpec.Term.symbolArity s))
+            (Name (Test.QuickSpec.Term.name s))
+            (case t of
+               HSE.Parser.ParseOk t'        -> unwrapParens (const () <$> t')
+               HSE.Parser.ParseFailed _ err -> error (concat [
+                                      "Failed to parse const type: ",
+                                      err,
+                                      ". Type was: ",
+                                      show (Test.QuickSpec.Term.symbolType s)]))
+
+splitCommas s = if ',' `elem` s
+                   then takeWhile (/= ',') s :
+                        splitCommas (tail (dropWhile (/= ',') s))
+                   else [s]
 
 
 pruneEqs' :: (WithSig [Test.QuickSpec.Equation.Equation] -> WithSig String) -> [Equation] -> IO (Maybe String)
@@ -874,12 +902,10 @@ pruneEqs' f eqs = exec main''
                            "instance Ord Z where { compare _ _ = Prelude.EQ; };",
                            "instance (Ord a) => Ord (S a) where { compare (Main.S x) (Main.S y) = Prelude.compare x y; };"]
 
-pruneEqsN' :: ((Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Equation.Equation]) -> Test.QuickSpec.Signature.Sig -> String) -> [Equation] -> String
-pruneEqsN' f eqs = renderWithSigN (f pruned) sig
-  where pruned = unSomePruneN clss
-        sig    = sigFromEqs eqs
-        clss   = unSomeClassesN eqs
-
+pruneEqsN :: [Equation] -> [Equation]
+pruneEqsN eqs = showEqsOnLinesN pruned
+  where pruned = unSomePruneN (map ($ sig) (unSomeClassesN eqs)) sig
+        sig    = renderN (sigFromEqs eqs)
 
 
 putErr = hPutStrLn stderr

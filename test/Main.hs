@@ -21,6 +21,7 @@ import           System.IO.Unsafe
 import           Test.QuickCheck
 import           Test.QuickCheck.Monadic
 import qualified Test.QuickSpec.Signature
+import qualified Test.QuickSpec.Equation
 import qualified Test.QuickSpec.Term
 import           Test.Tasty            (defaultMain, testGroup, localOption)
 import           Test.Tasty.QuickCheck
@@ -67,6 +68,7 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "New reduce"                   newReduce
   , testProperty "Can prune equations"          canPruneEqs
   , testProperty "Type parsing regression"      regressionTypeParse
+  , testProperty "Reduction matches QuickSpec"  natEqsMatchQS
   ]
 
 -- Tests
@@ -74,13 +76,21 @@ main = defaultMain $ testGroup "All tests" [
 genNormalisedVar = do
   eqs' <- genNormalisedEqs
   case sigFromEqs eqs' of
-       Sig _ []    -> discard
+       Sig _ []    -> scale (+1) genNormalisedVar
        Sig _ (v:_) -> return v
+
+genNormalisedConst = do
+  eqs' <- genNormalisedEqs
+  case sigFromEqs eqs' of
+       Sig []    _ -> scale (+1) genNormalisedConst
+       Sig (c:_) _ -> return c
 
 genNormalisedEqs = do
   eqs <- arbitrary
   let (_, eqs') = replaceTypes eqs
   return eqs'
+
+genNormalisedSig = sigFromEqs <$> genNormalisedEqs
 
 canMakeVars = do
   v <- genNormalisedVar
@@ -212,44 +222,39 @@ sigsHaveVars' eqs =
                         )
   in counterexample dbg (return hasVars :: Gen Bool)
 
-sigConstsUniqueIndices = doOnce sigConstsUniqueIndices'
+sigConstsUniqueIndices = once . resize 20 $ do
+  s <- genNormalisedSig
+  c <- genNormalisedConst
+  return (sigConstsUniqueIndices' s c)
 
 -- Use `c` to generate a bunch of similar constants `consts`, add them to `s` to
 -- get `sig`. Render `sig` to a QuickSpec signature, then print out its constant
 -- symbols and compare with those of `sig`.
-sigConstsUniqueIndices' s (Const a (Name n') t) = testEval mkExpr hasConsts
-  where n = 'x' : n'  -- Avoid issues with linefeed being cut off
-        mkExpr () = let syms  = constantSymbols' $$$ render sig
-                        names = (map' $$$ name') $$$ syms
-                        e     = unlines' $$$ names
-                     in (e, (("consts",    consts),
-                             ("sigconsts", sigConsts sig)))
-        hasConsts Nothing    = error "Failed to evaluate"
-        hasConsts (Just out) = setEq (map Name (lines out))
-                                     (map constName (sigConsts sig))
-        consts = [Const a (Name (n ++ show i)) t | i <- [0..10]]
-        sig    = withConsts consts s
+sigConstsUniqueIndices' s (Const a (Name n) t) = hasConsts
+  where syms      = Test.QuickSpec.Signature.constantSymbols (renderN sig)
+        names     = map Test.QuickSpec.Term.name syms
+        hasConsts = setEq (map Name names)
+                          (map constName (sigConsts sig))
+        consts    = [Const a (Name (n ++ show i)) t | i <- [0..10]]
+        sig       = withConsts consts s
 
 sigVarsUniqueIndices :: Property
-sigVarsUniqueIndices = once (property sigVarsUniqueIndices')
+sigVarsUniqueIndices = once $ resize 20 $ do
+  s <- genNormalisedSig
+  v <- genNormalisedVar
+  return (sigVarsUniqueIndices' s v)
 
 -- Use `v` to generate a bunch of `Var`s of the same type, `vars`, add them to
 -- `s` to get `sig`. Render `sig` to a QuickSpec signature, then print out its
 -- variable symbols and compare with those of `sig`.
-sigVarsUniqueIndices' :: Sig -> Var -> Property
-sigVarsUniqueIndices' s (Var t _ a) = testEval mkExpr hasVars
-  where mkExpr :: () -> (TypedExpr String, _)
-        mkExpr () = let syms  = variableSymbols' $$$ render sig
-                        names = (map' $$$ name') $$$ syms
-                        e     = unlines' $$$ names
-                     in (e, (("vars" :: String, vars),
-                             ("sig"  :: String, sig)))
-        hasVars :: Maybe String -> Bool
-        hasVars Nothing    = error "Failed to evaluate"
-        hasVars (Just out) = setEq (map Name (readVars out))
-                                   (map varName (sigVars sig))
-        vars = [Var t i a | i <- [0..10]]
-        sig  = withVars vars s
+sigVarsUniqueIndices' :: Sig -> Var -> Bool
+sigVarsUniqueIndices' s (Var t _ a) = hasVars
+  where syms    = Test.QuickSpec.Signature.variableSymbols (renderN sig)
+        names   = map Test.QuickSpec.Term.name syms
+        hasVars = setEq (map Name names)
+                        (map varName (sigVars sig))
+        vars    = [Var t i a | i <- [0..10]]
+        sig     = withVars vars s
 
 -- Some vars get split over multiple lines
 readVars s = accumulate [] (lines s)
@@ -415,9 +420,73 @@ regressionTypeParse = once . monadicIO $ do
     assert (LB.length (encode result) > 0)
   where ex = "{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"List Integer -> List Integer\",\"symbol\":\"reverse\"},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}}"
 
+natHasEqs = once $ monadicIO $ do
+  raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
+  case eitherDecode raw :: Either String [Equation] of
+    Left err  -> error err
+    Right []  -> error "No equations found"
+    Right eqs -> assert True
+
+natKeepsEqs = once $ monadicIO $ do
+  raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
+  eqs <- run $ parseAndReduceN raw
+  case eqs of
+    [] -> error "No equations found"
+    _  -> assert True
+
+natEqsMatchQS = once $ monadicIO $ do
+  raw      <- run $ LB.readFile "test/data/nat-simple-raw.json"
+  expect   <- run $ LB.readFile "test/data/nat-simple-expect.json"
+  foundEqs <- run $ parseAndReduceN raw
+  let Right rawEqs    = eitherDecode raw    :: Either String [Equation]
+      Right expectEqs = eitherDecode expect :: Either String [Equation]
+  monitor . counterexample . show $ (("foundEqs",  foundEqs),
+                                     ("expectEqs", expectEqs),
+                                     ("rawEqs",    rawEqs))
+  case setDiff foundEqs expectEqs of
+    Just diff -> do monitor . counterexample . show $ ("diff", diff)
+                    assert False
+    Nothing   -> assert True
+
+extractedTypesUnique (Eqs eqs) = counterexample (show types) (nub types == types)
+  where types = allTypes eqs
+
+convertTypesIso (Eqs eqs) =
+  let (_, eqs') = replaceTypes eqs
+      qsEqs  = sort (mkEqs2N (map ($ sig) clss))
+      sig    = renderN (sigFromEqs eqs')
+      clss   = unSomeClassesN eqs'
+      conv   = map qsEqToEq qsEqs
+      result = setEq eqs' conv
+   in case setDiff eqs' conv of
+    Nothing -> property True
+    Just ((_, extraEqs'), (_, extraConv)) ->
+      counterexample (show (("qsEqs", qsEqs),
+                            ("eqs'",  eqs'),
+                            ("conv",  conv),
+                            ("sig",   sig),
+                            ("extraEqs'", extraEqs'),
+                            ("extraConv", extraConv)))
+                     (property False)
+
+eqsSymmetric [] = return True
+eqsSymmetric eqs = do
+  Eq l r <- elements eqs
+  return (Eq r l `elem` eqs)
+
+eqsSetEq eqs = setEq eqs (map swap eqs)
+  where swap (Eq l r) = Eq r l
+
+
 -- Helpers
 
 setEq xs ys = all (`elem` xs) ys && all (`elem` ys) xs
+
+setDiff xs ys = if null (xs' ++ ys')
+                   then Nothing
+                   else Just (("xs", xs'), ("ys", ys'))
+  where xs' = filter (`notElem` ys) xs
+        ys' = filter (`notElem` xs) ys
 
 endsInTrue x = case x of
   Nothing -> False

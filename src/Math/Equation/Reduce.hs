@@ -23,7 +23,9 @@ showEqs = mapM_ (BS.putStrLn . encode)
 parseAndReduce :: BS.ByteString -> IO [Equation]
 parseAndReduce s = reduction (parseLines s)
 
-parseAndReduceN s = reductionN (parseLines s)
+parseAndReduceN s = case eitherDecode s of
+  Left  err -> error ("Failed to parse eqs: " ++ err)
+  Right eqs -> reductionN eqs
 
 reduction eqs = do
   let (db, eqs') = replaceTypes eqs
@@ -34,9 +36,12 @@ reduction eqs = do
 
 reductionN :: [Equation] -> IO [Equation]
 reductionN eqs = do
+  if consistent eqs
+     then return ()
+     else error "Inconsistent types in parsed equations"
   let (db, eqs') = replaceTypes eqs
       o = pruneEqsN eqs'
-  return (replaceVars db (S.fromString o))
+  return (restoreTypes db o)
 
 parseLines :: BS.ByteString -> [Equation]
 parseLines s = map (setForEq . parse) eqLines
@@ -59,11 +64,11 @@ replaceTypes eqs = let db = zip typs new
         s = HSE.Syntax.TyApp () (tyCon "S")
 
 replaceEqTypes db (Eq l r) = Eq (replaceTermTypes l) (replaceTermTypes r)
-  where replaceTermTypes (C (Const a n t))  = C (Const a n (replace t))
-        replaceTermTypes (V (Var t i a))    = V (Var (replace t) i a)
-        replaceTermTypes (App l r (Just t)) = App (replaceTermTypes l)
-                                                  (replaceTermTypes r)
-                                                  (Just (replace t))
+  where replaceTermTypes (C (Const a n t)) = C (Const a n (replace t))
+        replaceTermTypes (V (Var t i a))   = V (Var (replace t) i a)
+        replaceTermTypes (App l r t)       = App (replaceTermTypes l)
+                                                 (replaceTermTypes r)
+                                                 (replace <$> t)
 
         replace = replaceInType . unwrapParens
 
@@ -75,20 +80,14 @@ replaceEqTypes db (Eq l r) = Eq (replaceTermTypes l) (replaceTermTypes r)
           (error (show t ++ " not in " ++ show db))
           (lookup t db)
 
--- Required, since 'parse (prettyPrint t)' might have TyParens which 't' doesn't
-unwrapParens (HSE.Syntax.TyFun _ i o) = HSE.Syntax.TyFun ()
-                                                         (unwrapParens i)
-                                                         (unwrapParens o)
-unwrapParens (HSE.Syntax.TyApp _ i o) = HSE.Syntax.TyApp ()
-                                                         (unwrapParens i)
-                                                         (unwrapParens o)
-unwrapParens (HSE.Syntax.TyParen _ t) = unwrapParens t
-unwrapParens t                        = t
-
 tyCon = HSE.Syntax.TyCon () . HSE.Syntax.UnQual () . HSE.Syntax.Ident ()
 
 allTypes :: [Equation] -> [Type]
-allTypes = filter notFunc . concatMap components . catMaybes . nub . concatMap eqTypes
+allTypes = nub . filter notFunc
+               . concatMap components
+               . catMaybes
+               . nub
+               . concatMap eqTypes
   where eqTypes (Eq l r) = termTypes l ++ termTypes r
         termTypes (App l r t) = [unwrapParens <$> t] ++ termTypes l ++ termTypes r
         termTypes t           = [unwrapParens <$> termType t]
