@@ -592,11 +592,7 @@ classesFromEqs eqs = trc ("classesFromEqs clss",  clss)  .
   where result = combine [] clss'
         clss   = foldl addToClasses [] eqs
         clss'  = map nub (foldl extend clss terms)
-        terms  = concatMap (\(Eq l r) -> l : r : subTerms l ++ subTerms r) eqs
-
-        subTerms (App l r _) = l : r : subTerms l ++ subTerms r
-        subTerms (C c)       = [C c]
-        subTerms (V v)       = [V v]
+        terms  = concatMap (\(Eq l r) -> [l, r]) eqs
 
         extend []     t = [[t]]
         extend (c:cs) t = if t `elem` c

@@ -35,15 +35,17 @@ reduction eqs = do
        Just o  -> return (replaceVars db (S.fromString o))
 
 reductionN :: [Equation] -> [Equation]
-reductionN eqs = if consistent eqs
+reductionN eqs = if consistent eqs'
                     then result
                     else error "Inconsistent types in parsed equations"
-  where (db, eqs') = replaceTypes eqs
-        o          = pruneEqsN eqs'
-        result     = trc ("db",   db)   .
-                     trc ("eqs'", eqs') .
-                     trc ("o",    o)    $
-                     restoreTypes db o
+  where eqs'        = setAllTypes eqs
+        (db, eqs'') = replaceTypes eqs'
+        o           = pruneEqsN eqs''
+        result      = trc ("db",    db)    .
+                      trc ("eqs'",  eqs')  .
+                      trc ("eqs''", eqs'') .
+                      trc ("o",     o)     $
+                      restoreTypes db o
 
 parseLines :: BS.ByteString -> [Equation]
 parseLines s = map (setForEq . parse) eqLines

@@ -265,15 +265,16 @@ setAllTypes :: [Equation] -> [Equation]
 setAllTypes = map setForEq
 
 setForEq (Eq l r) = Eq (setForTerm l) (setForTerm r)
-  where setForTerm (C c)              = C c
-        setForTerm (V v)              = V v
-        setForTerm (App l r (Just t)) = App (setForTerm l) (setForTerm r) (Just t)
-        setForTerm (App l r Nothing)  =
-          let l' = setForTerm l
-              r' = setForTerm r
-           in case termType' l' of
-                HSE.Syntax.TyFun _ _ o -> App l' r' (Just o)
-                x                      -> error ("Expected function type, got " ++ show x)
+
+setForTerm (C c)              = C c
+setForTerm (V v)              = V v
+setForTerm (App l r (Just t)) = App (setForTerm l) (setForTerm r) (Just t)
+setForTerm (App l r Nothing)  =
+  let l' = setForTerm l
+      r' = setForTerm r
+   in case termType' l' of
+           HSE.Syntax.TyFun _ _ o -> App l' r' (Just o)
+           x                      -> error ("Expected function type, got " ++ show x)
 
 asList' :: [Expr] -> Expr
 asList' []     = "[]"

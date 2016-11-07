@@ -16,14 +16,20 @@ import           Language.Eval.Internal
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Math.Equation.Internal
 import           Math.Equation.Reduce
+import           Numeric.Natural
 import           System.Directory
 import           System.IO.Unsafe
 import           Test.QuickCheck
 import           Test.QuickCheck.Monadic
-import qualified Test.QuickSpec.Signature
 import qualified Test.QuickSpec.Equation
+import qualified Test.QuickSpec.Generate
+import qualified Test.QuickSpec.Main
 import qualified Test.QuickSpec.Reasoning.CongruenceClosure
 import qualified Test.QuickSpec.Reasoning.NaiveEquationalReasoning
+import qualified Test.QuickSpec.Signature
+import qualified Test.QuickSpec.TestTree
+import qualified Test.QuickSpec.Utils.Typed
+import qualified Test.QuickSpec.Utils.TypeMap
 import qualified Test.QuickSpec.Term
 import           Test.Tasty            (defaultMain, testGroup, localOption)
 import           Test.Tasty.QuickCheck
@@ -82,6 +88,10 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Can prune"                    justPrune
   , testProperty "New reduce"                   newReduce
   , testProperty "Reduce is idempotent"         reduceIdem
+  , testProperty "Redundant transitivity"       transStripped
+  , testProperty "Generated terms have type"    termsHaveType
+  , testProperty "Manual Nat finds eqs"         manualNatFindsEqs
+  , testProperty "Manual Nat reduces given"     manualNatReducesGiven
   ]
 
 -- Tests
@@ -382,32 +392,28 @@ regressionTypeParse = LB.length (encode result) > 0
   where ex = "[{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"List Integer -> List Integer\",\"symbol\":\"reverse\"},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}}]"
         result = parseAndReduceN ex
 
-natHasEqs = once $ monadicIO $ do
-  raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
-  case eitherDecode raw :: Either String [Equation] of
-    Left err  -> error err
-    Right []  -> error "No equations found"
-    Right eqs -> assert True
+natHasEqs = case eitherDecode rawNatEqs :: Either String [Equation] of
+                 Left err  -> error err
+                 Right []  -> error "No equations found"
+                 Right eqs -> True
 
-natKeepsEqs = once $ monadicIO $ do
-  raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
-  case parseAndReduceN raw of
-    [] -> error "No equations found"
-    _  -> assert True
+natKeepsEqs = case parseAndReduceN rawNatEqs of
+                   [] -> error "No equations found"
+                   _  -> True
 
-natClassesNontrivial = once $ monadicIO $ do
-  raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
-  let Right rawEqs = eitherDecode raw :: Either String [Equation]
+natClassesNontrivial =
+  let raw = rawNatEqs
+      rawEqs = parsedNatEqs
       (_, rawEqs') = replaceTypes rawEqs
       classes      = classesFromEqs rawEqs'
-  monitor . counterexample . show $ classes
-  assert (any (\c -> length c > 2) classes)
+   in counterexample (show classes)
+                     (any (\c -> length c > 2) classes)
 
 commClassesNontrivial n1 n2 i o = once $
     counterexample (show (("eqs",  eqs),
                           ("clss", clss),
                           ("comm", comm)))
-      (all ((> 1) . length . nub) clss)
+      (all ((> 1) . length . nub) clss')
   where f = C $ Const (Arity 2) n1 (HSE.Syntax.TyFun () i (HSE.Syntax.TyFun () i o))
         q = C $ Const (Arity 1) n2 (HSE.Syntax.TyFun () o o)
         x = V $ Var i 0 (Arity iArity)
@@ -483,8 +489,8 @@ commProvable n1@(Name n) n2' i o = counterexample dbg result
 
 
 natEqsPruned = once $ monadicIO $ do
-  raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
-  let Right rawEqs = eitherDecode raw :: Either String [Equation]
+  let raw = rawNatEqs
+      rawEqs = parsedNatEqs
       (_, rawEqs') = replaceTypes rawEqs
       sig          = renderN (sigFromEqs rawEqs')
       classes      = unSomeClassesN rawEqs' sig
@@ -493,10 +499,10 @@ natEqsPruned = once $ monadicIO $ do
   assert (length pruned < length rawEqs')
 
 natEqsMatchQS = once $ monadicIO $ do
-  raw    <- run $ LB.readFile "test/data/nat-simple-raw.json"
   expect <- run $ LB.readFile "test/data/nat-simple-expect.json"
-  let foundEqs        = parseAndReduceN raw
-      Right rawEqs    = eitherDecode raw    :: Either String [Equation]
+  let raw    = rawNatEqs
+      foundEqs        = parseAndReduceN raw
+      rawEqs    = parsedNatEqs
       Right expectEqs = eitherDecode expect :: Either String [Equation]
       fLen = length foundEqs
       eLen = length expectEqs
@@ -579,7 +585,184 @@ reduceIdem' (Eqs eqs) = setEq eqs' eqs''
   where eqs'  = reductionN eqs
         eqs'' = reductionN eqs'
 
+transStripped t = do
+    a <- termOfType t
+    b <- termOfType t
+    c <- termOfType t
+    let eqs' = reductionN eqs
+        eqs  = [Eq a b, Eq b c, Eq a c]
+    return . counterexample (show ("a",    a))    .
+             counterexample (show ("b",    b))    .
+             counterexample (show ("c",    c))    .
+             counterexample (show ("eqs",  eqs))  .
+             counterexample (show ("eqs'", eqs')) $
+                            (length eqs' == 2)
+
+termsHaveType ty = forAll (termOfType ty) checkType
+  where checkType trm = termType (setForTerm trm) == Just ty
+
+manualNatFindsEqs = once . monadicIO $ do
+  -- Our raw equations, for comparison
+  let rawEqs = parsedNatEqs
+
+  -- Taken from the main 'quickSpec' function
+  r <- run $ Test.QuickSpec.Generate.generate
+               False
+               (const Test.QuickSpec.Term.partialGen)
+               natSig
+
+  let clss  = concatMap (Test.QuickSpec.Utils.Typed.some2
+                           (map (Test.QuickSpec.Utils.Typed.Some .
+                                 Test.QuickSpec.Utils.Typed.O)   . Test.QuickSpec.TestTree.classes))
+                        (Test.QuickSpec.Utils.TypeMap.toList r)
+      eqs  = Test.QuickSpec.Equation.equations clss
+      eqs' = dbgEqs eqs
+  monitor . counterexample . show $ ("eqs'", eqs')
+
+  -- Our golden input should match these
+  assert (length eqs == length rawEqs)
+
+manualNatAllowsGiven = once . monadicIO $ do
+  let raw = rawNatEqs
+      rawEqs = parsedNatEqs
+      clss         = classesFromEqs rawEqs
+      clss'        = sort (map (sort . mkUnSomeClassN natSig) clss)
+      eqs'         = unSomePruneN clss' natSig
+  monitor (counterexample (show eqs'))
+  assert (length eqs' >  0)
+  assert (length eqs' <= length rawEqs)
+
+manualNatClassesMatch = counterexample dbg result
+  where ourClss   = classesFromEqs parsedNatEqs
+        ourClss'  = sort (map (sort . mkUnSomeClassN natSig) ourClss)
+        ourClss'' = map (map Test.QuickSpec.Term.term) ourClss'
+
+        result = setEq natNonTrivial ourClss''
+
+        natNonTrivial = filter ((> 1) . length) natClasses
+
+        dbg    = show (("qs non-trivial", length natNonTrivial),
+                       ("our classes",    length ourClss''))
+
+topNatTermsFound = all termInClasses (termsOf [] parsedNatEqs)
+  where termsOf acc []          = acc
+        termsOf acc (Eq l r:xs) = termsOf (l:r:acc) xs
+        termInClasses t = let qs = any (renderTermN t natSig `elem`) natClasses
+                              us = any (t `elem`) clss
+                           in case (qs, us) of
+                                (False, False) -> error $ show t ++ " not found in either"
+                                (False, _)     -> error $ show t ++ " not in QS"
+                                (_, False)     -> error $ show t ++ " not in ours"
+                                _              -> True
+        clss = classesFromEqs parsedNatEqs
+
+qsNatTermsFound = case (unfoundInOurs, unfoundInQS) of
+    ([], []) -> True
+    (us, qs) -> error (show (("unfound in ours", us),
+                             ("unfound in QS",   qs)))
+  where allTerms = concat (filter ((> 1) . length) natClasses)
+
+        clss = classesFromEqs parsedNatEqs
+
+        inOurs t = any (t `elem`) (map (map (`renderTermN` natSig)) clss)
+
+        inQS t = any (t `elem`) natClasses
+
+        unfoundInOurs = filter (not . inOurs) allTerms
+
+        unfoundInQS   = filter (not . inQS)   allTerms
+
+natClassesIncludeSingletons = any ((== 1) . length) natClasses
+
+{-
+Should fail
+natSubTermsFound = case (unfoundInOurs, unfoundInQS) of
+    ([], []) -> True
+    (us, qs) -> error (show (("unfound in ours", us),
+                             ("unfound in QS",   qs)))
+  where allTerms = allTermsOf [] parsedNatEqs
+
+        allTermsOf acc []          = acc
+        allTermsOf acc (Eq l r:xs) = allTermsOf (l:r:acc ++ subTerms l ++ subTerms r) xs
+
+        subTerms (C _)       = []
+        subTerms (V _)       = []
+        subTerms (App l r _) = l : r : subTerms l ++ subTerms r
+
+        clss = classesFromEqs parsedNatEqs
+
+        inOurs t = any (t `elem`) clss
+
+        inQS t = any (renderTermN t natSig `elem`) natClasses
+
+        unfoundInOurs = filter (not . inOurs) allTerms
+
+        unfoundInQS   = filter (not . inQS)   allTerms
+-}
+
+manualNatReducesSelf = once . monadicIO $ do
+  -- Taken from the main 'quickSpec' function
+  r <- run $ Test.QuickSpec.Generate.generate
+               False
+               (const Test.QuickSpec.Term.partialGen)
+               natSig
+
+  let rawEqs = parsedNatEqs
+      clss = concatMap (Test.QuickSpec.Utils.Typed.some2
+                          (map (Test.QuickSpec.Utils.Typed.Some .
+                                Test.QuickSpec.Utils.Typed.O)   . Test.QuickSpec.TestTree.classes))
+                       (Test.QuickSpec.Utils.TypeMap.toList r)
+
+      pruned = doPrune clss
+
+      -- For debugging
+      eqs' = pruned
+  monitor . counterexample . show $ ("eqs'", eqs')
+  assert False
+
+manualNatReducesGiven = once . monadicIO $ do
+  let raw = rawNatEqs
+      rawEqs = parsedNatEqs
+      clss         = classesFromEqs rawEqs
+      clss' :: [[Test.QuickSpec.Term.Expr Test.QuickSpec.Term.Term]]
+      clss'        = sort (map (sort . mkUnSomeClassN natSig) clss)
+      clss''       = map (Test.QuickSpec.Utils.Typed.Some .
+                            Test.QuickSpec.Utils.Typed.O) clss'
+      --eqs'         = unSomePruneN clss' natSig
+
+      univ   = concatMap (Test.QuickSpec.Utils.Typed.some2
+                           (map (Test.QuickSpec.Utils.Typed.tagged term)))
+                         clss''
+      reps   = map (Test.QuickSpec.Utils.Typed.some2
+                     (Test.QuickSpec.Utils.Typed.tagged term . head)) clss''
+      eqs    = Test.QuickSpec.Equation.equations clss''
+      ctx    = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
+                 (Test.QuickSpec.Signature.maxDepth natSig)
+                 (Test.QuickSpec.Signature.symbols natSig)
+                 univ
+      allEqs = map (Test.QuickSpec.Utils.Typed.some
+                     Test.QuickSpec.Equation.eraseEquation)
+                   eqs
+      pruned = Test.QuickSpec.Main.prune
+                 ctx
+                 (filter (not . Test.QuickSpec.Term.isUndefined)
+                         (map Test.QuickSpec.Utils.Typed.erase reps))
+                 id
+                 allEqs
+
+  monitor (counterexample (show (dbgEqs eqs)))
+  assert (length pruned < length rawEqs)
+
 -- Helpers
+
+natSig = mconcat [
+  Test.QuickSpec.Signature.fun0 "cZ"    (0    :: Natural),
+  Test.QuickSpec.Signature.fun1 "cS"    ((+1) :: Natural -> Natural),
+  Test.QuickSpec.Signature.fun2 "plus"  ((+)  :: Natural -> Natural -> Natural),
+  Test.QuickSpec.Signature.fun2 "times" ((*)  :: Natural -> Natural -> Natural),
+  Test.QuickSpec.Signature.gvars (map (\n -> "(var, Nat, " ++ show n ++ ")")
+                                      [0, 1, 2])
+    (((fromInteger . abs) <$> arbitrary) :: Gen Natural)]
 
 genEqsWithVars = arbitrary `suchThat` hasVars
   where hasVars eqs = case sigFromEqs eqs of
@@ -994,3 +1177,48 @@ instance Show Test.QuickSpec.Reasoning.CongruenceClosure.S where
                    ")\n  (lookup ",
                    show (Test.QuickSpec.Reasoning.CongruenceClosure.lookup s)
                    ]
+
+dbgEqs = map (Test.QuickSpec.Utils.Typed.some
+               (Test.QuickSpec.Equation.showTypedEquation natSig))
+
+rawNatEqs = unsafePerformIO (LB.readFile "test/data/nat-simple-raw.json")
+
+Right parsedNatEqs = eitherDecode rawNatEqs :: Either String [Equation]
+
+doPrune clss = pruned
+  where univ = concatMap (Test.QuickSpec.Utils.Typed.some2
+                           (map (Test.QuickSpec.Utils.Typed.tagged term)))
+                         clss
+        reps = map (Test.QuickSpec.Utils.Typed.some2
+                     (Test.QuickSpec.Utils.Typed.tagged term . head))
+                   clss
+        eqs  = Test.QuickSpec.Equation.equations clss
+
+        ctx  = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
+                 (Test.QuickSpec.Signature.maxDepth natSig)
+                 (Test.QuickSpec.Signature.symbols natSig)
+                 univ
+
+        allEqs = map (Test.QuickSpec.Utils.Typed.some
+                       Test.QuickSpec.Equation.eraseEquation)
+                     eqs
+
+        pruned = Test.QuickSpec.Main.prune
+                   ctx
+                   (filter (not . Test.QuickSpec.Term.isUndefined)
+                           (map Test.QuickSpec.Utils.Typed.erase reps))
+                   id
+                   allEqs
+
+natClasses = map (Test.QuickSpec.Utils.Typed.several
+                   (map Test.QuickSpec.Term.term))
+                 qsClss
+  where qsClss = concatMap (Test.QuickSpec.Utils.Typed.some2
+                             (map (Test.QuickSpec.Utils.Typed.Some .
+                                   Test.QuickSpec.Utils.Typed.O)   .
+                             Test.QuickSpec.TestTree.classes))
+                           (Test.QuickSpec.Utils.TypeMap.toList r)
+        r = unsafePerformIO $ Test.QuickSpec.Generate.generate
+                                False
+                                (const Test.QuickSpec.Term.partialGen)
+                                natSig
