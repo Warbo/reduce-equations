@@ -20,6 +20,7 @@ import qualified Data.Map
 import qualified Data.Ord
 import Data.String
 import Data.Typeable
+import Debug.Trace (traceShow)
 import Language.Eval.Internal
 import qualified Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
@@ -32,6 +33,7 @@ import Text.Read  -- Uses String as part of base, not Text
 
 -- Used for their types
 import qualified Test.QuickCheck.Gen
+import qualified Test.QuickCheck.Random
 import qualified Test.QuickSpec
 import qualified Test.QuickSpec.Main
 import qualified Test.QuickSpec.Signature
@@ -273,17 +275,6 @@ data HasType = forall a. (Ord a, Typeable a) => MkHT a
 instance Show HasType where
   show (MkHT x) = "HasType(" ++ show (typeRep [x]) ++ ")"
 
-{-
-data (Ord a, Ord b, Ord c, Ord d, Ord e, Ord f,
-      Typeable a, Typeable b, Typeable c, Typeable d, Typeable e, Typeable f) =>
-     QSFun a b c d e f = F0 a
-                       | F1 (a -> b)
-                       | F2 (a -> b -> c)
-                       | F3 (a -> b -> c -> d)
-                       | F4 (a -> b -> c -> d -> e)
-                       | F5 (a -> b -> c -> d -> e -> f)
--}
-
 data TSig a where
    TsZ :: TSig Z
    TsS :: TSig a -> TSig (S a)
@@ -293,22 +284,6 @@ tsToV :: TSig a -> a
 tsToV  TsZ      = Z ()
 tsToV (TsS x)   = S (tsToV x)
 tsToV (TsF f x) = \a -> tsToV x
-
-{-
---vToD :: Type -> (String -> QSSig, _)
-vToD (Language.Haskell.Exts.Syntax.TyFun _ x y) = TsF (vToD x) (vToD y)
-vToD (Language.Haskell.Exts.Syntax.TyApp _ s x) = toDyn TsS (vToD x)
-vToD _                                          = toDyn Z
--}
-
-{-
-f0 = Test.QuickSpec.Signature.fun0
-f1 = Test.QuickSpec.Signature.fun1
-f2 = Test.QuickSpec.Signature.fun2
-f3 = Test.QuickSpec.Signature.fun3
-f4 = Test.QuickSpec.Signature.fun4
-f5 = Test.QuickSpec.Signature.fun5
--}
 
 class Specable a where
   specable :: String -> a -> QSSig
@@ -358,9 +333,6 @@ instance Specable Z where
 instance (Specable a, Ord (S a), Typeable a) => Specable (S a) where
   specable = Test.QuickSpec.Signature.fun0
 
---instance (Specable a, Specable b, Specable c) => Specable (a -> b -> c) where
---  specable = Test.QuickSpec.Signature.fun2
-
 class Base a where
   base :: a
 
@@ -375,13 +347,6 @@ instance (Base a, Base b) => Base (a -> b) where
 
 data E = forall a. Base a => E a
 
-{-
-vToS :: Type -> QSSig
-vToS (Language.Haskell.Exts.Syntax.TyFun x y) = specable (fP (vToP x) (vToP y))
-vToS (Language.Haskell.Exts.Syntax.TyApp s x) = specable (sP (vToP x))
-vToS _                                        = specable  zP
--}
-
 zP :: Z
 zP = undefined
 
@@ -390,57 +355,6 @@ sP _ = undefined
 
 fP :: a -> b -> (a -> b)
 fP _ _ = undefined
-
-{-
-ts2U TsZ = undefined :: Z
-ts2U (TsS x) = S (ts2U x)
-
-ts2Q (TsF a (TsF b (TsF c (TsF d (TsF e f))))) = f5
--}
-
-{-
-data family Specable a
-
-data instance Specable (a -> b) =
-data instance Specable a
--}
-{-
-renderQSConst c = sigOf case fromDynamic (allSigs !! index) of
-                    Just f' -> f'
-  where a' = case a of
-          0 -> a
-          1 -> a
-          2 -> a
-          3 -> a
-          4 -> a
-          5 -> a
-          _ -> error ("No fun* function for arity " ++ show a)
-
-        Arity a    = constArity c
-        Name  name = constName  c
-        t          = constType  c
-
-        index = 5 * sigDepth t + a'
-
-        sigDepth (Language.Haskell.Exts.Syntax.TyApp _ x) = 1 + sigDepth x
-        sigDepth _                                        = 0
-
-        allSigs = sigsFrom (Z ())
-
-        sigOf x = case cast x of
-          Just x' -> Test.QuickSpec.Signature.fun0 name x'
-          Nothing -> case cast x of
-            Just x' -> Test.QuickSpec.Signature.fun1 name x'
-            Nothing -> case cast x of
-              Just x' -> Test.QuickSpec.Signature.fun2 name x'
-              Nothing -> case cast x of
-                Just x' -> Test.QuickSpec.Signature.fun3 name x'
-                Nothing -> case cast x of
-                  Just x' -> Test.QuickSpec.Signature.fun4 name x'
-                  Nothing -> case cast x of
-                    Just x' -> Test.QuickSpec.Signature.fun5 name x'
-                    Nothing -> error ("No fun* function for arity " ++ show a)
--}
 
 sigToSym :: Term -> WithSig Test.QuickSpec.Term.Symbol
 sigToSym t = WS (head' $$$ filtered)
@@ -672,9 +586,22 @@ genOf' t = return' $$$ undef
   where undef = TE . raw $ "Prelude.undefined :: (" ++ typeName t ++ ")"
 
 classesFromEqs :: [Equation] -> [[Term]]
-classesFromEqs = combine [] . map nub . addAllToClasses []
+classesFromEqs eqs = trc ("classesFromEqs clss",  clss)  .
+                     trc ("classesFromEqs clss'", clss') $
+                     result
+  where result = combine [] clss'
+        clss   = foldl addToClasses [] eqs
+        clss'  = map nub (foldl extend clss terms)
+        terms  = concatMap (\(Eq l r) -> l : r : subTerms l ++ subTerms r) eqs
 
-addAllToClasses = foldl addToClasses
+        subTerms (App l r _) = l : r : subTerms l ++ subTerms r
+        subTerms (C c)       = [C c]
+        subTerms (V v)       = [V v]
+
+        extend []     t = [[t]]
+        extend (c:cs) t = if t `elem` c
+                             then c:cs
+                             else c : extend cs t
 
 addToClasses cs (Eq l r) = case cs of
   []   -> [[l, r]]
@@ -694,18 +621,23 @@ combine acc (c:cs) = case nub (overlaps c) of
 unSomeClasses :: [Equation] -> [WithSig [Test.QuickSpec.Term.Expr a]]
 unSomeClasses eqs = map mkUnSomeClass (classesFromEqs eqs)
 
-unSomeClassesN :: [Equation] -> [Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Term.Expr a]]
-unSomeClassesN eqs = map mkUnSomeClassN (classesFromEqs eqs)
-
+unSomeClassesN :: [Equation] -> Test.QuickSpec.Signature.Sig -> [[Test.QuickSpec.Term.Expr Term]]
+unSomeClassesN eqs sig = trc ("unSomeClassesN classes",  classes)  .
+                         trc ("unSomeClassesN unsorted", unsorted) .
+                         trc ("unSomeClassesN result",   result)   $
+                         result
+  where classes  = classesFromEqs eqs
+        unsorted = map (sort . mkUnSomeClassN sig) classes
+        result   = sort unsorted
 
 mkUnSomeClass :: [Term] -> WithSig [Test.QuickSpec.Term.Expr a]
 mkUnSomeClass []     = WS nil'
 mkUnSomeClass (x:xs) = case (termToExpr x, mkUnSomeClass xs) of
                             (WS y, WS ys) -> WS ((cons' $$$ y) $$$ ys)
 
-mkUnSomeClassN :: [Term] -> Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Term.Expr a]
-mkUnSomeClassN []     sig = []
-mkUnSomeClassN (x:xs) sig = termToExprN x sig : mkUnSomeClassN xs sig
+mkUnSomeClassN :: Test.QuickSpec.Signature.Sig -> [Term] -> [Test.QuickSpec.Term.Expr a]
+mkUnSomeClassN sig []     = []
+mkUnSomeClassN sig (x:xs) = termToExprN x sig : mkUnSomeClassN sig xs
 
 
 
@@ -717,36 +649,64 @@ unSomePrune clss = WS ((((prune' $$$ arg1) $$$ arg2) $$$ id') $$$ arg3)
         arg3  = sort' $$$ mkEqs2 clss'
         clss' = map (\(WS x) -> x) clss
 
-unSomePruneN :: [[Test.QuickSpec.Term.Expr Term]] -> Test.QuickSpec.Signature.Sig -> [Test.QuickSpec.Equation.Equation]
-unSomePruneN clss sig = Test.QuickSpec.Main.prune arg1 arg2 id arg3
-  where arg1  = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
+unSomePruneN :: [[Test.QuickSpec.Term.Expr Term]]
+             -> Test.QuickSpec.Signature.Sig
+             -> [Test.QuickSpec.Equation.Equation]
+unSomePruneN clss sig =
+    trc ("unSomePruneN reps", reps) .
+    trc ("unSomePruneN sig",  sig)  .
+    trc ("unSomePruneN eqs",  eqs)  $
+    result
+  where result = Test.QuickSpec.Main.prune ctx reps id eqs
+
+        ctx   = mkCxt clss sig
+
+        reps  = classesToReps clss
+
+        eqs   = sort (mkEqs2N clss)
+
+mkCxt clss sig = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
+                   (Test.QuickSpec.Signature.maxDepth sig)
+                   (Test.QuickSpec.Signature.symbols  sig)
+                   (mkUniv2N clss)
+
+classesToReps clss = filter (not . Test.QuickSpec.Term.isUndefined)
+                            (map (term . head) clss)
+
+unSomePruneEqs :: [[Test.QuickSpec.Term.Expr Term]]
+               -> Test.QuickSpec.Signature.Sig
+               -> [Test.QuickSpec.Equation.Equation]
+               -> [Test.QuickSpec.Equation.Equation]
+unSomePruneEqs clss sig eqs = Test.QuickSpec.Main.prune ctx arg2 id eqs
+  where ctx   = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
                   (Test.QuickSpec.Signature.maxDepth sig)
-                  (Test.QuickSpec.Signature.symbols sig)
+                  (Test.QuickSpec.Signature.symbols  sig)
                   (mkUniv2N clss)
         arg2  = filter (not . Test.QuickSpec.Term.isUndefined)
                        (getTermHeadN clss)
-        arg3  = sort (mkEqs2N clss)
+
 
 
 mkUniv2 :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
 mkUniv2 = foldr (\x -> ((append' $$$ ((map' $$$ univ2) $$$ x)) $$$)) nil'
 
-mkUniv2N :: Typeable a => [[Test.QuickSpec.Term.Expr a]] -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
-mkUniv2N = foldr (\x -> (((++) $ ((map $ univ2N) $ x)) $)) []
+mkUniv2N :: Typeable a => [[Test.QuickSpec.Term.Expr a]]
+                       -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
+mkUniv2N = concatMap (map univ2N)
 
-
+--univ = concatMap (some2 (map (tagged term))) clss
 
 univ2 :: TypedExpr (Test.QuickSpec.Term.Expr a -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term)
 univ2 = tlam "y" body `withType` t
   where body = (conTagged' $$$ (conSome' $$$ (conWitness' $$$ (strip' $$$ "y")))) $$$ (term' $$$ "y")
         t    = "Data.Typeable.Typeable a => Test.QuickSpec.Term.Expr a -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term"
 
-univ2N :: Data.Typeable.Typeable a => Test.QuickSpec.Term.Expr a -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term
-univ2N y = (conTagged $ (conSome $ (conWitness $ (stripN $ y)))) $ (term $ y)
-  where conTagged  = Test.QuickSpec.Utils.Typed.Tagged
-        conSome    = Test.QuickSpec.Utils.Typed.Some
-        conWitness = Test.QuickSpec.Utils.Typed.Witness
-
+univ2N :: Data.Typeable.Typeable a => Test.QuickSpec.Term.Expr a
+                                   -> Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term
+univ2N y = Test.QuickSpec.Utils.Typed.Tagged
+             (Test.QuickSpec.Utils.Typed.Some
+               (Test.QuickSpec.Utils.Typed.Witness (stripN y)))
+             (term y)
 
 
 conWitness' :: TypedExpr (a -> Test.QuickSpec.Utils.Typed.Witnessed a)
@@ -764,7 +724,13 @@ undefined' = TE "Prelude.undefined"
 
 stripN :: Test.QuickSpec.Term.Expr a -> a
 -- TypedExpr (Test.QuickSpec.Term.Expr Test.QuickSpec.Term.Term -> Test.QuickSpec.Term.Term)
-stripN x = undefined
+stripN x = Test.QuickSpec.Term.eval x (Test.QuickSpec.Term.Valuation unvar)
+  where unvar = runGen                       .
+                Test.QuickSpec.Term.totalGen .
+                Test.QuickSpec.Term.value    .
+                Test.QuickSpec.Term.unVariable
+        qcgen    = Test.QuickCheck.Random.mkQCGen 0
+        runGen g = Test.QuickCheck.Gen.unGen g qcgen 0
 
 
 
@@ -772,7 +738,7 @@ stripN x = undefined
 getTermHead :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Term.Term]
 getTermHead = foldr (\c -> ((cons' $$$ (term' $$$ (head' $$$ c))) $$$)) nil'
 
-getTermHeadN = foldr (\c -> (term (head c) :)) []
+getTermHeadN = map (Test.QuickSpec.Term.term . head)
 
 
 
@@ -786,9 +752,7 @@ mkEqs2 (c:cs) = (append' $$$ (f $$$ c)) $$$ mkEqs2 cs
   where f    = TE $ withMods ["Test.QuickSpec.Equation"] g
         TE g = tlam "(z:zs)" "[Test.QuickSpec.Term.term y :=: Test.QuickSpec.Term.term z | y <- zs]"
 
--- mkEqs2N :: [TypedExpr [Test.QuickSpec.Term.Expr a]] -> TypedExpr [Test.QuickSpec.Equation.Equation]
-mkEqs2N []     = []
-mkEqs2N (c:cs) = ((++) $ (f $ c)) $ mkEqs2N cs
+mkEqs2N cs = sort (concatMap f cs)
   where f (z:zs) = [term y Test.QuickSpec.Equation.:=: term z | y <- zs]
 
 
@@ -869,6 +833,7 @@ symToVar s =
                                     rawT]))
           (read (init idx) :: Int)
           (Arity (Test.QuickSpec.Term.symbolArity s))
+
 symToConst s =
   let t = HSE.Parser.parseType (show (Test.QuickSpec.Term.symbolType s))
    in Const (Arity (Test.QuickSpec.Term.symbolArity s))
@@ -903,9 +868,56 @@ pruneEqs' f eqs = exec main''
                            "instance (Ord a) => Ord (S a) where { compare (Main.S x) (Main.S y) = Prelude.compare x y; };"]
 
 pruneEqsN :: [Equation] -> [Equation]
-pruneEqsN eqs = showEqsOnLinesN pruned
-  where pruned = unSomePruneN (map ($ sig) (unSomeClassesN eqs)) sig
-        sig    = renderN (sigFromEqs eqs)
+pruneEqsN eqs = trc ("pruneEqsN pruned",  pruned)  .
+                trc ("pruneEqsN classes", classes) .
+                trc ("pruneEqsN sig",     sig)     $
+                result
+  where pruned  = unSomePruneN classes sig
+        sig     = let sig'  = renderN (sigFromEqs eqs)
+                      sig'' = Test.QuickSpec.Signature.signature sig'
+                   in sig'' `mappend` Test.QuickSpec.Main.undefinedsSig sig''
+        result  = showEqsOnLinesN pruned
+        classes = unSomeClassesN eqs sig
 
+dumpSym s = (("index"       :: String, Test.QuickSpec.Term.index       s),
+             ("name"        :: String, Test.QuickSpec.Term.name        s),
+             ("symbolArity" :: String, Test.QuickSpec.Term.symbolArity s),
+             ("silent"      :: String, Test.QuickSpec.Term.silent      s),
+             ("undef"       :: String, Test.QuickSpec.Term.undef       s),
+             ("symbolType"  :: String, Test.QuickSpec.Term.symbolType  s))
 
 putErr = hPutStrLn stderr
+
+debug = case unsafePerformIO (lookupEnv "DEBUG") of
+  Nothing -> False
+  Just "" -> False
+  _       -> True
+
+trc :: Show a => a -> b -> b
+trc = if debug
+         then traceShow
+         else \x y -> y
+
+instance Show (Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term) where
+  show t = show ("Tagged"      :: String,
+                  ("tag"       :: String,
+                    ("type"    :: String, Test.QuickSpec.Utils.Typed.witnessType
+                                            (Test.QuickSpec.Utils.Typed.tag t))),
+                  ("erase"     :: String, Test.QuickSpec.Utils.Typed.erase t))
+
+-- From Test.QuickSpec.Main
+provable reps (t Test.QuickSpec.Equation.:=: u) = do
+  res <- t Test.QuickSpec.Reasoning.NaiveEquationalReasoning.=?= u
+  if res
+     then return True
+     else do
+       state <- Test.QuickSpec.Reasoning.NaiveEquationalReasoning.get
+       -- Check that we won't unify two representatives---if we do
+       -- the equation is false
+       t Test.QuickSpec.Reasoning.NaiveEquationalReasoning.=:= u
+       reps' <- mapM Test.QuickSpec.Reasoning.NaiveEquationalReasoning.rep reps
+       if sort reps' == Test.QuickSpec.Utils.usort reps'
+          then return False
+          else do
+            Test.QuickSpec.Reasoning.NaiveEquationalReasoning.put state
+            return True

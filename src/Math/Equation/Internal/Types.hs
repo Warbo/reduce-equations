@@ -6,7 +6,8 @@ import           Control.Monad
 import           Data.Aeson
 import           Data.List
 import           Data.Maybe
-import           Data.Stringable
+import           Data.Ord (comparing)
+import           Data.Stringable hiding (length)
 import qualified Data.Text.Lazy          as T
 import qualified Data.Text.Lazy.Encoding as TE
 import           Language.Eval
@@ -14,6 +15,7 @@ import qualified Language.Haskell.Exts.Parser as HSE.Parser
 import qualified Language.Haskell.Exts.Pretty as HSE.Pretty
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           System.Environment
+import qualified Test.QuickSpec.Utils
 import           Text.Read  (readMaybe) -- Uses String as part of base, not Text
 
 -- Types to represent equations, constants, variables, etc. and functions for
@@ -47,6 +49,29 @@ instance Eq Term where
   (App l1 r1 _) == (App l2 r2 _) = l1 == l2 && r1 == r2
   _             == _             = False
 
+-- Duplicates the sorting ofTest.QuickSpec.Term.Term, but without the type
+-- juggling of "Some" and friends
+instance Ord Term where
+  compare = comparing stamp
+    where stamp t = (depth t, size 0 t, -occur t, body t)
+
+          occur t = length (Test.QuickSpec.Utils.usort (vars t []))
+
+          body (V     x)   = Left (Left x)
+          body (C     x)   = Left (Right x)
+          body (App f x _) = Right (f, x)
+
+          vars (V  x)      = (x:)
+          vars (App f x _) = vars f . vars x
+          vars (C _)       = id
+
+          size v (App f x _) = size v f + size v x
+          size v (V _)       = v
+          size v (C _)       = 1
+
+          depth (App f x _) = depth f `max` (1 + depth x)
+          depth _           = 1
+
 instance Show Term where
   show (C c)       = "C (" ++ show c ++ ")"
   show (V v)       = "V (" ++ show v ++ ")"
@@ -77,7 +102,7 @@ instance Eq Sig where
                                    all (`elem` vs1) vs2 &&
                                    all (`elem` vs2) vs1
 
-data Var = Var Type Int Arity deriving (Show, Eq)
+data Var = Var Type Int Arity deriving (Show, Eq, Ord)
 
 instance ToJSON Var where
   toJSON (Var t i a) = object ["role"  .= ("variable" :: String),
@@ -97,7 +122,7 @@ countArity _                        = 0
 
 doCount haystack needle = T.count (T.pack needle) (T.pack haystack)
 
-data Const = Const Arity Name Type deriving (Show, Eq)
+data Const = Const Arity Name Type deriving (Show, Eq, Ord)
 
 instance ToJSON Const where
   toJSON (Const a n t) = object ["role"   .= ("constant" :: String),
@@ -126,7 +151,7 @@ instance FromJSON Type where
 stripLoc :: HSE.Syntax.Type a -> Type
 stripLoc = fmap (const ())
 
-data Name = Name String deriving (Show, Eq)
+data Name = Name String deriving (Show, Eq, Ord)
 
 instance ToJSON Name where
   toJSON (Name n) = toJSON n

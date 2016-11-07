@@ -16,7 +16,7 @@ import           Math.Equation.Internal.Types
 
 doReduce = BS.getContents >>= parseAndReduce >>= showEqs
 
-doReduceN = BS.getContents >>= parseAndReduceN >>= showEqs
+doReduceN = parseAndReduceN <$> BS.getContents >>= showEqs
 
 showEqs = mapM_ (BS.putStrLn . encode)
 
@@ -34,14 +34,16 @@ reduction eqs = do
        Nothing -> error "Failed to reduce given input"
        Just o  -> return (replaceVars db (S.fromString o))
 
-reductionN :: [Equation] -> IO [Equation]
-reductionN eqs = do
-  if consistent eqs
-     then return ()
-     else error "Inconsistent types in parsed equations"
-  let (db, eqs') = replaceTypes eqs
-      o = pruneEqsN eqs'
-  return (restoreTypes db o)
+reductionN :: [Equation] -> [Equation]
+reductionN eqs = if consistent eqs
+                    then result
+                    else error "Inconsistent types in parsed equations"
+  where (db, eqs') = replaceTypes eqs
+        o          = pruneEqsN eqs'
+        result     = trc ("db",   db)   .
+                     trc ("eqs'", eqs') .
+                     trc ("o",    o)    $
+                     restoreTypes db o
 
 parseLines :: BS.ByteString -> [Equation]
 parseLines s = map (setForEq . parse) eqLines
@@ -63,22 +65,23 @@ replaceTypes eqs = let db = zip typs new
         z = tyCon "Z"
         s = HSE.Syntax.TyApp () (tyCon "S")
 
-replaceEqTypes db (Eq l r) = Eq (replaceTermTypes l) (replaceTermTypes r)
-  where replaceTermTypes (C (Const a n t)) = C (Const a n (replace t))
-        replaceTermTypes (V (Var t i a))   = V (Var (replace t) i a)
-        replaceTermTypes (App l r t)       = App (replaceTermTypes l)
-                                                 (replaceTermTypes r)
-                                                 (replace <$> t)
+replaceEqTypes db (Eq l r) = Eq (replaceTermTypes db l) (replaceTermTypes db r)
 
-        replace = replaceInType . unwrapParens
+replaceTermTypes db trm = case trm of
+    C (Const a n t) -> C (Const a n (replace t))
+    V (Var t i a)   -> V (Var (replace t) i a)
+    App l r t       -> App (replaceTermTypes db l)
+                           (replaceTermTypes db r)
+                           (replace <$> t)
+  where replace = replaceInType db . unwrapParens
 
-        replaceInType (HSE.Syntax.TyFun _ i o) = HSE.Syntax.TyFun
-                                                   ()
-                                                   (replaceInType i)
-                                                   (replaceInType o)
-        replaceInType t                      = fromMaybe
-          (error (show t ++ " not in " ++ show db))
-          (lookup t db)
+replaceInType db (HSE.Syntax.TyFun _ i o) = HSE.Syntax.TyFun
+                                            ()
+                                            (replaceInType db i)
+                                            (replaceInType db o)
+replaceInType db t                        = fromMaybe
+  (error (show t ++ " not in " ++ show db))
+  (lookup t db)
 
 tyCon = HSE.Syntax.TyCon () . HSE.Syntax.UnQual () . HSE.Syntax.Ident ()
 

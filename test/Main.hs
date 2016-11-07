@@ -22,6 +22,8 @@ import           Test.QuickCheck
 import           Test.QuickCheck.Monadic
 import qualified Test.QuickSpec.Signature
 import qualified Test.QuickSpec.Equation
+import qualified Test.QuickSpec.Reasoning.CongruenceClosure
+import qualified Test.QuickSpec.Reasoning.NaiveEquationalReasoning
 import qualified Test.QuickSpec.Term
 import           Test.Tasty            (defaultMain, testGroup, localOption)
 import           Test.Tasty.QuickCheck
@@ -43,7 +45,7 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Variables are distinct"       sigVarsUniqueIndices
   , testProperty "Can find closure of term"     canFindClosure
   , testProperty "No classes without equations" noClassesFromEmptyEqs
-  , testProperty "Equation induces a class"     oneClassFromEq
+  , testProperty "Equation induces a class"     getClassFromEq
   , testProperty "Classes contain given terms"  classesHaveTerms
   , testProperty "Equal terms in same class"    eqPartsAppearInSameClass
   , testProperty "Terms appear in one class"    classesHaveNoDupes
@@ -61,74 +63,28 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "No trivial terms"             noTrivialTerms
   , testProperty "Equations are consistent"     eqsAreConsistent
   , testProperty "Switch function types"        switchFunctionTypes
+  , testProperty "Can prune equations"          canPruneEqs
+  , testProperty "Type parsing regression"      regressionTypeParse
+  , testProperty "Nat example has eqs"          natHasEqs
+  , testProperty "Nat example outputs eqs"      natKeepsEqs
+  , testProperty "Nat classes are nontrivial"   natClassesNontrivial
+  , testProperty "Commutativity is nontrivial"  commClassesNontrivial
+  , testProperty "Commutativity prunes"         commPruned
+  , testProperty "Nat equations are pruned"     natEqsPruned
+  , testProperty "Reduction matches QuickSpec"  natEqsMatchQS
+  , testProperty "Replacement types unique"     extractedTypesUnique
+  , testProperty "QuickSpec conversions invert" convertTypesIso
+  , testProperty "Symmetric equations equal"    eqsSymmetric
+  , testProperty "Spot symmetric equations"     eqsSetEq
   , testProperty "Can generate eq variables"    canMakeVars
   , testProperty "Can generate var QS sigs"     canMakeQSSigs
   , testProperty "Can find vars in sig"         lookupVars
   , testProperty "Can prune"                    justPrune
   , testProperty "New reduce"                   newReduce
-  , testProperty "Can prune equations"          canPruneEqs
-  , testProperty "Type parsing regression"      regressionTypeParse
-  , testProperty "Reduction matches QuickSpec"  natEqsMatchQS
+  , testProperty "Reduce is idempotent"         reduceIdem
   ]
 
 -- Tests
-
-genNormalisedVar = do
-  eqs' <- genNormalisedEqs
-  case sigFromEqs eqs' of
-       Sig _ []    -> scale (+1) genNormalisedVar
-       Sig _ (v:_) -> return v
-
-genNormalisedConst = do
-  eqs' <- genNormalisedEqs
-  case sigFromEqs eqs' of
-       Sig []    _ -> scale (+1) genNormalisedConst
-       Sig (c:_) _ -> return c
-
-genNormalisedEqs = do
-  eqs <- arbitrary
-  let (_, eqs') = replaceTypes eqs
-  return eqs'
-
-genNormalisedSig = sigFromEqs <$> genNormalisedEqs
-
-canMakeVars = do
-  v <- genNormalisedVar
-  return True
-
-canMakeQSSigs = do
-  v <- genNormalisedVar
-  let sig = renderQSVars [v]
-  return (length (show sig) > 0)
-
-lookupVars = once $ do
-  eqs <- resize 42 genEqsWithVars
-  let Sig _ vs  = sigFromEqs eqs'
-      (_, eqs') = replaceTypes eqs
-  v <- elements vs
-  let expectName = unName (varName v)
-      sig        = renderQSVars [v]
-      symbol     = sigToSymN (V v) sig
-      foundName  = Test.QuickSpec.Term.name symbol
-  return (expectName == foundName)
-
-genEqsWithVars = arbitrary `suchThat` hasVars
-  where hasVars eqs = case sigFromEqs eqs of
-          Sig _ [] -> False
-          _        -> True
-
-justPrune = once $ do
-    eqs <- resize 20 arbitrary
-    let (_, eqs') = replaceTypes eqs
-        o = pruneEqsN eqs'
-    return (length o >= 0)
-
-newReduce = once (forAll (resize 20 arbitrary) newReduce')
-newReduce' eqs = monadicIO $ do
-  result <- run $ reductionN eqs
-  monitor . counterexample . show $ (("eqs",    eqs),
-                                     ("result", result))
-  assert (length (show result) > 0)
 
 canParseEquations = all try [
       "{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":7}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"[Integer] -> [Integer] -> Ordering\",\"symbol\":\"lengthCompare\"},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}},\"rhs\":{\"role\":\"variable\",\"type\":\"[Integer]\",\"id\":6}}}",
@@ -264,7 +220,8 @@ readVars s = accumulate [] (lines s)
 
 noClassesFromEmptyEqs = null (classesFromEqs [])
 
-oneClassFromEq eq = length (classesFromEqs [eq]) == 1
+-- Sub-terms are added, which can make more than one class
+getClassFromEq eq = length (classesFromEqs [eq]) >= 1
 
 classesHaveTerms eqs = found `all` terms
   where terms            = concatMap termsOf eqs
@@ -296,7 +253,7 @@ equationsHaveSameArity (Eqs eqs) = all sameArity eqs
 
 nonEqualElementsSeparate ty = forAll (iterable ty) nonEqualElementsSeparate'
 
-nonEqualElementsSeparate' (t, v) = match classes expected && match expected classes
+nonEqualElementsSeparate' (t, v) = all found expected
   where (a:b:c:d:e:f:_) = map extend [0..]
 
         extend 0 = t
@@ -307,6 +264,8 @@ nonEqualElementsSeparate' (t, v) = match classes expected && match expected clas
         classes = classesFromEqs eqs
 
         expected = [[a, b, c], [d, e, f]]
+
+        found xs = any (setEq xs) classes
 
         match xs ys = all (\x -> any (setEq x) ys) xs
 
@@ -327,9 +286,13 @@ classElementsAreEqual' (Eqs eqs) = all elementsAreEqual classes
         equal :: Term -> Term -> Bool
         equal x y = y `isElem` eqClosure eqs x
 
-classesNotSingletons (Eqs eqs) = all nonSingle classes
-  where nonSingle c = length c > 1
-        classes     = classesFromEqs eqs
+classesNotSingletons (Eqs eqs) = all nonSingle classes'
+  where nonSingle c = length (nub c) > 1
+        classes     = classesFromEqs eqs  -- All classes, even subterms
+        classes'    = filter (\c -> any (`elem` c) terms) classes  -- Top-level
+        terms       = getTerms [] eqs
+        getTerms acc []          = acc
+        getTerms acc (Eq l r:es) = getTerms (l:r:acc) es
 
 canFindClosure ty = forAll (iterable ty) canFindClosure'
 
@@ -391,12 +354,12 @@ canRenderEqs' (Eqs eqs) = run
         haveEqs (Just s) = length (filter ("==" `isInfixOf`) (lines s)) == length eqs
 
 canPruneEqs = once (forAll (resize 20 arbitrary) canPruneEqs')
-canPruneEqs' (Eqs eqs) = monadicIO $ do
-    eqs' <- run $ reductionN eqs
-    monitor (counterexample (show (("eqs", eqs), ("eqs'", eqs'))))
-    assert (expected eqs')
+canPruneEqs' (Eqs eqs) = counterexample (show (("eqs", eqs), ("eqs'", eqs')))
+                                        (expected eqs')
   where expected []     =      null eqs -- No output when no eqs
         expected (x:xs) = not (null eqs)
+
+        eqs' = reductionN eqs
 
 canGetTermType input output = expected (termType' term)
   where term  = app (C (Const undefined undefined func))
@@ -415,10 +378,9 @@ switchFunctionTypes i1 i2 o1 o2 = check <$> termOfType (HSE.Syntax.TyFun () i1 o
         check f = let [Eq lhs rhs] = restoreTypes db [replaceEqTypes db (Eq f f)]
                    in termType lhs == termType rhs
 
-regressionTypeParse = once . monadicIO $ do
-    result <- run $ parseAndReduceN ex
-    assert (LB.length (encode result) > 0)
-  where ex = "{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"List Integer -> List Integer\",\"symbol\":\"reverse\"},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}}"
+regressionTypeParse = LB.length (encode result) > 0
+  where ex = "[{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"List Integer -> List Integer\",\"symbol\":\"reverse\"},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}}]"
+        result = parseAndReduceN ex
 
 natHasEqs = once $ monadicIO $ do
   raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
@@ -429,33 +391,136 @@ natHasEqs = once $ monadicIO $ do
 
 natKeepsEqs = once $ monadicIO $ do
   raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
-  eqs <- run $ parseAndReduceN raw
-  case eqs of
+  case parseAndReduceN raw of
     [] -> error "No equations found"
     _  -> assert True
 
+natClassesNontrivial = once $ monadicIO $ do
+  raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
+  let Right rawEqs = eitherDecode raw :: Either String [Equation]
+      (_, rawEqs') = replaceTypes rawEqs
+      classes      = classesFromEqs rawEqs'
+  monitor . counterexample . show $ classes
+  assert (any (\c -> length c > 2) classes)
+
+commClassesNontrivial n1 n2 i o = once $
+    counterexample (show (("eqs",  eqs),
+                          ("clss", clss),
+                          ("comm", comm)))
+      (all ((> 1) . length . nub) clss)
+  where f = C $ Const (Arity 2) n1 (HSE.Syntax.TyFun () i (HSE.Syntax.TyFun () i o))
+        q = C $ Const (Arity 1) n2 (HSE.Syntax.TyFun () o o)
+        x = V $ Var i 0 (Arity iArity)
+        y = V $ Var i 1 (Arity iArity)
+
+        iArity = countArity i
+
+        (cl, cr) = (App (App f x Nothing) y Nothing, App (App f y Nothing) x Nothing)
+        (ql, qr) = (App q (App (App f x Nothing) y Nothing) Nothing,
+                    App q (App (App f y Nothing) x Nothing) Nothing)
+        comm = Eq cl cr
+        eqs  = [comm, Eq ql qr]
+
+        clss  = classesFromEqs eqs
+        clss' = filter topLevel clss
+        topLevel c = any (`elem` c) [cl, cr, ql, qr]
+
+commPruned n1@(Name n) n2' i o =  counterexample (show (("eqs'", eqs'),
+                                                        ("comm", comm)))
+                                                 (eqs' == [comm])
+  where eqs' = reductionN eqs
+
+        f = C $ Const (Arity 2) n1 (HSE.Syntax.TyFun () i (HSE.Syntax.TyFun () i o))
+        q = C $ Const (Arity 1) n2 (HSE.Syntax.TyFun () o o)
+        x = V $ Var i 0 (Arity iArity)
+        y = V $ Var i 1 (Arity iArity)
+
+        -- Ensure n1 and n2 are distinct
+        n2 = if n1 == n2'
+                then Name (n ++ n)
+                else n2'
+
+        iArity = countArity i
+
+        comm = Eq (App (App f x Nothing) y Nothing) (App (App f y Nothing) x Nothing)
+        eqs  = [comm,
+                Eq (App q (App (App f x Nothing) y Nothing) Nothing)
+                   (App q (App (App f y Nothing) x Nothing) Nothing)]
+
+commProvable n1@(Name n) n2' i o = counterexample dbg result
+  where (result, ctx') = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.runEQ
+                           ctx
+                           prov
+        dbg  = unlines [
+            "ctx "  ++ show ctx
+          , "ctx' " ++ show ctx'
+          ]
+        ctx  = mkCxt classes sig
+        prov = provable reps (l' Test.QuickSpec.Equation.:=: r')
+
+        f = C $ Const (Arity 2) n1 (HSE.Syntax.TyFun () i (HSE.Syntax.TyFun () i o))
+        q = C $ Const (Arity 1) n2 (HSE.Syntax.TyFun () o o)
+        l = App q (App (App f x Nothing) y Nothing) Nothing
+        r = App q (App (App f y Nothing) x Nothing) Nothing
+
+        [x, y] = map (\idx -> V $ Var i idx (Arity (countArity i))) [0, 1]
+
+        l' = renderTermN (replaceTermTypes db l) sig
+        r' = renderTermN (replaceTermTypes db r) sig
+
+        -- Ensure n1 and n2 are distinct
+        n2 = if n1 == n2' then Name (n ++ n) else n2'
+
+        (db, eqs') = replaceTypes [
+            Eq (App (App f x Nothing) y Nothing) (App (App f y Nothing) x Nothing),
+            Eq (App q (App (App f x Nothing) y Nothing) Nothing) (App q (App (App f y Nothing) x Nothing) Nothing)
+          ]
+
+        sig     = renderN (sigFromEqs eqs')
+        classes = unSomeClassesN eqs' sig
+        reps    = classesToReps classes
+
+
+
+natEqsPruned = once $ monadicIO $ do
+  raw <- run $ LB.readFile "test/data/nat-simple-raw.json"
+  let Right rawEqs = eitherDecode raw :: Either String [Equation]
+      (_, rawEqs') = replaceTypes rawEqs
+      sig          = renderN (sigFromEqs rawEqs')
+      classes      = unSomeClassesN rawEqs' sig
+      pruned       = unSomePruneN (sort . map sort $ classes) sig
+  monitor . counterexample . unlines . map show $ pruned
+  assert (length pruned < length rawEqs')
+
 natEqsMatchQS = once $ monadicIO $ do
-  raw      <- run $ LB.readFile "test/data/nat-simple-raw.json"
-  expect   <- run $ LB.readFile "test/data/nat-simple-expect.json"
-  foundEqs <- run $ parseAndReduceN raw
-  let Right rawEqs    = eitherDecode raw    :: Either String [Equation]
+  raw    <- run $ LB.readFile "test/data/nat-simple-raw.json"
+  expect <- run $ LB.readFile "test/data/nat-simple-expect.json"
+  let foundEqs        = parseAndReduceN raw
+      Right rawEqs    = eitherDecode raw    :: Either String [Equation]
       Right expectEqs = eitherDecode expect :: Either String [Equation]
-  monitor . counterexample . show $ (("foundEqs",  foundEqs),
-                                     ("expectEqs", expectEqs),
-                                     ("rawEqs",    rawEqs))
+      fLen = length foundEqs
+      eLen = length expectEqs
+  monitor . counterexample $ show (trc (show (("foundEqs",  foundEqs),
+                                              ("expectEqs", expectEqs),
+                                              ("rawEqs",    rawEqs)))
+                                       (("length foundEqs",  length foundEqs),
+                                        ("length expectEqs", length expectEqs)))
   case setDiff foundEqs expectEqs of
-    Just diff -> do monitor . counterexample . show $ ("diff", diff)
+    Just diff -> do monitor . counterexample $ show (trc (show ("diff", diff))
+                                                         ("length diff", length diff))
                     assert False
     Nothing   -> assert True
 
-extractedTypesUnique (Eqs eqs) = counterexample (show types) (nub types == types)
+extractedTypesUnique (Eqs eqs) = counterexample (show types)
+                                                (nub types == types)
   where types = allTypes eqs
 
-convertTypesIso (Eqs eqs) =
+convertTypesIso = once (forAll (resize 20 arbitrary) convertTypesIso')
+convertTypesIso' (Eqs eqs) =
   let (_, eqs') = replaceTypes eqs
-      qsEqs  = sort (mkEqs2N (map ($ sig) clss))
+      qsEqs  = sort (mkEqs2N clss)
       sig    = renderN (sigFromEqs eqs')
-      clss   = unSomeClassesN eqs'
+      clss   = unSomeClassesN eqs' sig
       conv   = map qsEqToEq qsEqs
       result = setEq eqs' conv
    in case setDiff eqs' conv of
@@ -477,8 +542,68 @@ eqsSymmetric eqs = do
 eqsSetEq eqs = setEq eqs (map swap eqs)
   where swap (Eq l r) = Eq r l
 
+canMakeVars = do
+  v <- genNormalisedVar
+  return True
+
+canMakeQSSigs = do
+  v <- genNormalisedVar
+  let sig = renderQSVars [v]
+  return (length (show sig) > 0)
+
+lookupVars = once $ do
+  eqs <- resize 42 genEqsWithVars
+  let Sig _ vs  = sigFromEqs eqs'
+      (_, eqs') = replaceTypes eqs
+  v <- elements vs
+  let expectName = unName (varName v)
+      sig        = renderQSVars [v]
+      symbol     = sigToSymN (V v) sig
+      foundName  = Test.QuickSpec.Term.name symbol
+  return (expectName == foundName)
+
+justPrune = once $ do
+    eqs <- resize 20 arbitrary
+    let (_, eqs') = replaceTypes eqs
+        o = pruneEqsN eqs'
+    return (length o >= 0)
+
+newReduce = once (forAll (resize 20 arbitrary) newReduce')
+newReduce' eqs = counterexample (show (("eqs",    eqs),
+                                       ("result", result)))
+                                (length (show result) > 0)
+  where result = reductionN eqs
+
+reduceIdem = once (forAll (resize 20 arbitrary) reduceIdem')
+reduceIdem' (Eqs eqs) = setEq eqs' eqs''
+  where eqs'  = reductionN eqs
+        eqs'' = reductionN eqs'
 
 -- Helpers
+
+genEqsWithVars = arbitrary `suchThat` hasVars
+  where hasVars eqs = case sigFromEqs eqs of
+          Sig _ [] -> False
+          _        -> True
+
+genNormalisedVar = do
+  eqs' <- genNormalisedEqs
+  case sigFromEqs eqs' of
+       Sig _ []    -> scale (+1) genNormalisedVar
+       Sig _ (v:_) -> return v
+
+genNormalisedConst = do
+  eqs' <- genNormalisedEqs
+  case sigFromEqs eqs' of
+       Sig []    _ -> scale (+1) genNormalisedConst
+       Sig (c:_) _ -> return c
+
+genNormalisedEqs = do
+  eqs <- arbitrary
+  let (_, eqs') = replaceTypes eqs
+  return eqs'
+
+genNormalisedSig = sigFromEqs <$> genNormalisedEqs
 
 setEq xs ys = all (`elem` xs) ys && all (`elem` ys) xs
 
@@ -851,3 +976,21 @@ iterable ty = do t <- termOfType ty
                  return (t, v)
 
 tyFun = HSE.Syntax.TyFun ()
+
+instance Show Test.QuickSpec.Reasoning.NaiveEquationalReasoning.Context where
+  show cxt = concat ["(context\n  (universe ",
+                     show (Test.QuickSpec.Reasoning.NaiveEquationalReasoning.universe cxt),
+                     ")\n  (maxDepth ",
+                     show (Test.QuickSpec.Reasoning.NaiveEquationalReasoning.maxDepth cxt),
+                     ")\n  (rel ",
+                     show (Test.QuickSpec.Reasoning.NaiveEquationalReasoning.rel cxt),
+                     ")\n)"]
+
+instance Show Test.QuickSpec.Reasoning.CongruenceClosure.S where
+  show s = concat ["(S\n  (funUse ",
+                   show (Test.QuickSpec.Reasoning.CongruenceClosure.funUse s),
+                   ")\n  (argUse ",
+                   show (Test.QuickSpec.Reasoning.CongruenceClosure.argUse s),
+                   ")\n  (lookup ",
+                   show (Test.QuickSpec.Reasoning.CongruenceClosure.lookup s)
+                   ]
