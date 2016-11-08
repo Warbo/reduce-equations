@@ -176,7 +176,7 @@ sigsHaveConsts = once $ do
       names         = map constName cs
   return (checkNames names consts)
 
-sigsHaveVars = once (forAll (resize 42 genNormalisedEqs) sigsHaveVars')
+sigsHaveVars = once (forAllShrink (resize 42 genNormalisedEqs) sigsHaveVars')
 sigsHaveVars' eqs =
   let s@(Sig _ vs) = sigFromEqs eqs
 
@@ -271,7 +271,7 @@ classHasSameArity eqs = all oneArity classes
 equationsHaveSameArity (Eqs eqs) = all sameArity eqs
   where sameArity (Eq l r) = termArity l == termArity r
 
-nonEqualElementsSeparate ty = forAll (iterable ty) nonEqualElementsSeparate'
+nonEqualElementsSeparate ty = forAllShrink (iterable ty) nonEqualElementsSeparate'
 
 nonEqualElementsSeparate' (t, v) = all found expected
   where (a:b:c:d:e:f:_) = map extend [0..]
@@ -289,7 +289,7 @@ nonEqualElementsSeparate' (t, v) = all found expected
 
         match xs ys = all (\x -> any (setEq x) ys) xs
 
-classElementsAreEqual = once (forAll (resize 42 arbitrary) classElementsAreEqual')
+classElementsAreEqual = once (forAllShrink (resize 42 arbitrary) classElementsAreEqual')
 classElementsAreEqual' (Eqs eqs) = all elementsAreEqual classes
   where classes :: [[Term]]
         classes              = classesFromEqs eqs
@@ -314,7 +314,7 @@ classesNotSingletons (Eqs eqs) = all nonSingle classes'
         getTerms acc []          = acc
         getTerms acc (Eq l r:es) = getTerms (l:r:acc) es
 
-canFindClosure ty = forAll (iterable ty) canFindClosure'
+canFindClosure ty = forAllShrink (iterable ty) canFindClosure'
 
 canFindClosure' (t, v) = all match expected
   where -- Generate unique terms by wrapping in "app c"
@@ -373,7 +373,7 @@ canRenderEqs' (Eqs eqs) = run
         haveEqs Nothing  = error "Failed to eval"
         haveEqs (Just s) = length (filter ("==" `isInfixOf`) (lines s)) == length eqs
 
-canPruneEqs = once (forAll (resize 20 arbitrary) canPruneEqs')
+canPruneEqs = once (forAllShrink (resize 20 arbitrary) canPruneEqs')
 canPruneEqs' (Eqs eqs) = counterexample (show (("eqs", eqs), ("eqs'", eqs')))
                                         (expected eqs')
   where expected []     =      null eqs -- No output when no eqs
@@ -388,7 +388,7 @@ canGetTermType input output = expected (termType' term)
         strip = filter (/= ' ')
         expected t = strip (typeName t) === strip (typeName output)
 
-noTrivialTerms t = forAll (termOfType t) (not . trivial)
+noTrivialTerms t = forAllShrink (termOfType t) (not . trivial)
 
 eqsAreConsistent (Eqs eqs) = consistentEqs eqs
 
@@ -461,24 +461,28 @@ extractedTypesUnique (Eqs eqs) = counterexample (show types)
                                                 (nub types == types)
   where types = allTypes eqs
 
-convertTypesIso = once (forAll (resize 20 arbitrary) convertTypesIso')
+convertTypesIso =
+  (forAllShrink (resize 20 arbitrary)
+               (\x -> case convertTypesIso' x of
+                           ([],        [])        -> property True
+                           (extraEqs', extraConv) ->
+                             counterexample (show (("extraEqs'", extraEqs'),
+                                                   ("extraConv", extraConv)))
+                                            (property False)))
 convertTypesIso' (Eqs eqs) =
   let (_, eqs') = replaceTypes eqs
-      qsEqs  = Test.QuickSpec.Equation.equations clss
-      sig    = renderN (sigFromEqs eqs')
-      clss   = unSomeClassesN2 eqs' sig
-      conv   = map (qsEqToEq . Test.QuickSpec.Utils.Typed.some Test.QuickSpec.Equation.eraseEquation) qsEqs
-      result = setEq eqs' conv
-   in case setDiff eqs' conv of
-    ([], []) -> property True
-    (extraEqs', extraConv) ->
-      counterexample (show (("qsEqs", map (Test.QuickSpec.Utils.Typed.some Test.QuickSpec.Equation.eraseEquation) qsEqs),
-                            ("eqs'",  eqs'),
-                            ("conv",  conv),
-                            ("sig",   sig),
-                            ("extraEqs'", extraEqs'),
-                            ("extraConv", extraConv)))
-                     (property False)
+      qsEqs     = Test.QuickSpec.Equation.equations qsClss
+      sig       = renderN (sigFromEqs eqs')
+      qsClss    = unSomeClassesN2 eqs' sig
+      conv      = map (qsEqToEq . Test.QuickSpec.Utils.Typed.some Test.QuickSpec.Equation.eraseEquation) qsEqs
+      conv'     = map (Test.QuickSpec.Utils.Typed.several
+                        (map (qsTermToTerm . Test.QuickSpec.Term.term)))
+                      qsClss
+      clss      = classesFromEqs eqs'
+      result    = setEq clss conv'
+      cmp (Eq l1 r1) (Eq l2 r2) = (show l1 == show l2 && show r1 == show r2) ||
+                                  (show l1 == show r2 && show r1 == show l2)
+   in setDiffBy setEq clss conv'
 
 eqsSymmetric [] = return True
 eqsSymmetric eqs = do
@@ -514,13 +518,13 @@ justPrune = once $ do
         o = pruneEqsN eqs'
     return (length o >= 0)
 
-newReduce = once (forAll (resize 20 arbitrary) newReduce')
+newReduce = once (forAllShrink (resize 20 arbitrary) newReduce')
 newReduce' eqs = counterexample (show (("eqs",    eqs),
                                        ("result", result)))
                                 (length (show result) > 0)
   where result = reductionN eqs
 
-reduceIdem = once (forAll (resize 20 arbitrary) reduceIdem')
+reduceIdem = once (forAllShrink (resize 20 arbitrary) reduceIdem')
 reduceIdem' (Eqs eqs) = setEq eqs' eqs''
   where eqs'  = reductionN eqs
         eqs'' = reductionN eqs'
@@ -548,7 +552,7 @@ transStripped = once . resize 10 $ do
              then return eqs
              else getEligible
 
-termsHaveType ty = forAll (termOfType ty) checkType
+termsHaveType ty = forAllShrink (termOfType ty) checkType
   where checkType trm = termType (setForTerm trm) == Just ty
 
 manualNatFindsEqs = once . monadicIO $ do
@@ -574,9 +578,13 @@ manualNatAllowsGiven = counterexample (show eqs')
                        HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")))]
 
 manualNatClassesMatch = counterexample dbg result
-  where ourClss   = classesFromEqs parsedNatEqs
+  where ourClss   = classesFromEqs eqs'
         ourClss'  = sort (map (sort . mkUnSomeClassN natSig) ourClss)
         ourClss'' = map (map Test.QuickSpec.Term.term) ourClss'
+
+        eqs' = map (replaceEqTypes db) parsedNatEqs
+        db   = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Nat")),
+                 HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")))]
 
         result = setEq natNonTrivial ourClss''
 
@@ -794,7 +802,7 @@ exampleFiles = do
         isJson :: String -> Bool
         isJson x = reverse ".json" == take 5 (reverse x)
 
-withExamples = forAll (elements exampleEqs)
+withExamples = forAllShrink (elements exampleEqs)
 
 -- Random input generators
 
@@ -806,19 +814,19 @@ instance Arbitrary Equations where
 
   arbitrary = do
       -- Make a bunch of terms and declare them equal
-      classEqs <- listOf mkClass
+      classEqs <- scale (`div` 2) (listOf mkClass)
       let eqs = concat classEqs
 
       -- Pad out with filler
-      pre  <- arbitrary
-      post <- arbitrary
+      pre  <- scale (`div` 2) arbitrary
+      post <- scale (`div` 2) arbitrary
 
       -- Make sure it's consistent
       eqs' <- renameEqs (pre ++ eqs ++ post)
       return (Eqs eqs')
     where mkClass = do
             t  <- arbitrary
-            ts <- listOf (termOfType t)
+            ts <- scale (`div` 2) (listOf (termOfType t))
             return $ case ts of
                           [] -> []
                           (x:xs) -> [Eq x y | y <- xs]
@@ -1063,7 +1071,7 @@ dbg :: (Show a, Monad m) => a -> PropertyM m ()
 dbg = monitor . counterexample . show
 
 doOnce :: (Show a, Arbitrary a, Testable prop) => (a -> prop) -> Property
-doOnce = once . forAll (resize 42 arbitrary)
+doOnce = once . forAllShrink (resize 42 arbitrary)
 
 -- | The list of all terms equal to `x`, according to `eqs`
 eqClosure :: [Equation] -> Term -> Seq.Seq Term
