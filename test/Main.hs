@@ -79,7 +79,6 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Nat example outputs eqs"         natKeepsEqs
   , testProperty "Nat classes are nontrivial"      natClassesNontrivial
   , testProperty "Commutativity is nontrivial"     commClassesNontrivial
-  , testProperty "Commutativity prunes"            commPruned
   , testProperty "Nat equations are pruned"        natEqsPruned
   , testProperty "Reduction matches QuickSpec"     natEqsMatchQS
   , testProperty "Replacement types unique"        extractedTypesUnique
@@ -442,87 +441,21 @@ commClassesNontrivial n1 n2 i o = once $
         clss' = filter topLevel clss
         topLevel c = any (`elem` c) [cl, cr, ql, qr]
 
-commPruned n1@(Name n) n2' i o =  counterexample (show (("eqs'", eqs'),
-                                                        ("comm", comm)))
-                                                 (eqs' == [comm])
-  where eqs' = reductionN eqs
-
-        f = C $ Const (Arity 2) n1 (HSE.Syntax.TyFun () i (HSE.Syntax.TyFun () i o))
-        q = C $ Const (Arity 1) n2 (HSE.Syntax.TyFun () o o)
-        x = V $ Var i 0 (Arity iArity)
-        y = V $ Var i 1 (Arity iArity)
-
-        -- Ensure n1 and n2 are distinct
-        n2 = if n1 == n2'
-                then Name (n ++ n)
-                else n2'
-
-        iArity = countArity i
-
-        comm = Eq (App (App f x Nothing) y Nothing) (App (App f y Nothing) x Nothing)
-        eqs  = [comm,
-                Eq (App q (App (App f x Nothing) y Nothing) Nothing)
-                   (App q (App (App f y Nothing) x Nothing) Nothing)]
-
-commProvable n1@(Name n) n2' i o = counterexample dbg result
-  where (result, ctx') = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.runEQ
-                           ctx
-                           prov
-        dbg  = unlines [
-            "ctx "  ++ show ctx
-          , "ctx' " ++ show ctx'
-          ]
-        ctx  = mkCxt3 classes sig
-        prov = provable reps (l' Test.QuickSpec.Equation.:=: r')
-
-        f = C $ Const (Arity 2) n1 (HSE.Syntax.TyFun () i (HSE.Syntax.TyFun () i o))
-        q = C $ Const (Arity 1) n2 (HSE.Syntax.TyFun () o o)
-        l = App q (App (App f x Nothing) y Nothing) Nothing
-        r = App q (App (App f y Nothing) x Nothing) Nothing
-
-        [x, y] = map (\idx -> V $ Var i idx (Arity (countArity i))) [0, 1]
-
-        l' = renderTermN (replaceTermTypes db l) sig
-        r' = renderTermN (replaceTermTypes db r) sig
-
-        -- Ensure n1 and n2 are distinct
-        n2 = if n1 == n2' then Name (n ++ n) else n2'
-
-        (db, eqs') = replaceTypes [
-            Eq (App (App f x Nothing) y Nothing) (App (App f y Nothing) x Nothing),
-            Eq (App q (App (App f x Nothing) y Nothing) Nothing) (App q (App (App f y Nothing) x Nothing) Nothing)
-          ]
-
-        sig     = renderN (sigFromEqs eqs')
-        classes = unSomeClassesN2 eqs' sig
-        reps    = classesToReps2 classes
-
-
-
 natEqsPruned = length pruned < length rawEqs'
   where (_, rawEqs') = replaceTypes parsedNatEqs
         pruned       = pruneEqsN rawEqs'
 
 natEqsMatchQS = once $ monadicIO $ do
   expect <- run $ LB.readFile "test/data/nat-simple-expect.json"
-  let raw    = rawNatEqs
-      foundEqs        = parseAndReduceN raw
-      rawEqs    = parsedNatEqs
-      Right expectEqs = eitherDecode expect :: Either String [Equation]
+  let Right expectEqs = eitherDecode expect :: Either String [Equation]
+      foundEqs = parseAndReduceN rawNatEqs
       fLen = length foundEqs
       eLen = length expectEqs
   monitor . counterexample $ show (trc (show (("foundEqs",  foundEqs),
-                                              ("expectEqs", expectEqs),
-                                              ("rawEqs",    rawEqs)))
+                                              ("expectEqs", expectEqs)))
                                        (("length foundEqs",  length foundEqs),
                                         ("length expectEqs", length expectEqs)))
-  case setDiff foundEqs expectEqs of
-    ([], [])   -> assert True
-    (xs', ys') -> do monitor . counterexample . show $
-                       (("xs'", xs'),
-                        ("ys'", ys'),
-                        ("length diff", length xs' + length ys'))
-                     assert False
+  assert (length foundEqs == length expectEqs)
 
 extractedTypesUnique (Eqs eqs) = counterexample (show types)
                                                 (nub types == types)
