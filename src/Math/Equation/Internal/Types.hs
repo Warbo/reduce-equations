@@ -327,3 +327,11 @@ unwrapParens (HSE.Syntax.TyApp _ i o) = HSE.Syntax.TyApp ()
                                                          (unwrapParens o)
 unwrapParens (HSE.Syntax.TyParen _ t) = unwrapParens t
 unwrapParens t                        = t
+
+replaceInType db (HSE.Syntax.TyFun _ i o) = HSE.Syntax.TyFun
+                                            ()
+                                            (replaceInType db i)
+                                            (replaceInType db o)
+replaceInType db t                        = fromMaybe
+  (error (show t ++ " not in " ++ show db))
+  (lookup t db)

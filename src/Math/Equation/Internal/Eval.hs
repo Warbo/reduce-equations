@@ -249,6 +249,8 @@ getRep t = case t of
       (Language.Haskell.Exts.Syntax.UnQual _
         (Language.Haskell.Exts.Syntax.Ident _ "Z")) -> typeRep [Z ()]
 
+    _ -> error ("Unknown type '" ++ show t ++ "'. Did you forget replaceTypes?")
+
   where sCon = typeRepTyCon (typeRep [S (Z ())])  -- The Z gets discarded
 
 -- Construct a value of some normalised type. We use an existential so that

@@ -77,14 +77,6 @@ replaceTermTypes db trm = case trm of
                            (replace <$> t)
   where replace = replaceInType db . unwrapParens
 
-replaceInType db (HSE.Syntax.TyFun _ i o) = HSE.Syntax.TyFun
-                                            ()
-                                            (replaceInType db i)
-                                            (replaceInType db o)
-replaceInType db t                        = fromMaybe
-  (error (show t ++ " not in " ++ show db))
-  (lookup t db)
-
 tyCon = HSE.Syntax.TyCon () . HSE.Syntax.UnQual () . HSE.Syntax.Ident ()
 
 allTypes :: [Equation] -> [Type]
