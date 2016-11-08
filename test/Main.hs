@@ -592,18 +592,28 @@ reduceIdem' (Eqs eqs) = setEq eqs' eqs''
   where eqs'  = reductionN eqs
         eqs'' = reductionN eqs'
 
-transStripped t = do
-    a <- termOfType t
-    b <- termOfType t
-    c <- termOfType t
-    let eqs' = reductionN eqs
-        eqs  = [Eq a b, Eq b c, Eq a c]
-    return . counterexample (show ("a",    a))    .
-             counterexample (show ("b",    b))    .
-             counterexample (show ("c",    c))    .
-             counterexample (show ("eqs",  eqs))  .
-             counterexample (show ("eqs'", eqs')) $
-                            (length eqs' == 2)
+transStripped = once . resize 10 $ do
+    eqs <- getEligible
+    let (_, eqs') = replaceTypes eqs
+        classes   = classesFromEqs eqs'
+        eligible  = not (all ((== 2) . length) classes)
+
+        -- Choose a class with more than 2 elements
+        cls       = head (filter ((> 2) . length) classes)
+
+        -- Add a bunch of redundant equations between its members
+        extra     = eqs' ++ [Eq x y | x <- cls, y <- cls]
+        pruned    = reductionN extra
+
+    -- Check if (at least) our redundant equations got stripped out
+    return (length pruned <= length eqs)
+  where getEligible = do
+          Eqs eqs <- scale (+5) arbitrary
+          let classes  = classesFromEqs eqs
+              eligible = not (all ((== 2) . length) classes)
+          if eligible
+             then return eqs
+             else getEligible
 
 termsHaveType ty = forAll (termOfType ty) checkType
   where checkType trm = termType (setForTerm trm) == Just ty
@@ -619,15 +629,16 @@ manualNatFindsEqs = once . monadicIO $ do
   -- Our golden input should match these
   assert (length eqs == length rawEqs)
 
-manualNatAllowsGiven = once . monadicIO $ do
-  let raw = rawNatEqs
-      rawEqs = parsedNatEqs
-      clss         = classesFromEqs rawEqs
-      clss'        = sort (map (sort . mkUnSomeClassN natSig) clss)
-      eqs'         = unSomePruneN clss' natSig
-  monitor (counterexample (show eqs'))
-  assert (length eqs' >  0)
-  assert (length eqs' <= length rawEqs)
+manualNatAllowsGiven = counterexample (show eqs')
+                                      ((length eqs' >  0) &&
+                                       (length eqs' <= length parsedNatEqs))
+  where clss   = classesFromEqs naturalEqs
+        clss'  = sort (map (sort . mkUnSomeClassN natSig) clss)
+        eqs'   = unSomePruneN clss' natSig
+
+        naturalEqs = map (replaceEqTypes db) parsedNatEqs
+        db         = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Nat")),
+                       HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")))]
 
 manualNatClassesMatch = counterexample dbg result
   where ourClss   = classesFromEqs parsedNatEqs
@@ -641,7 +652,7 @@ manualNatClassesMatch = counterexample dbg result
         dbg    = show (("qs non-trivial", length natNonTrivial),
                        ("our classes",    length ourClss''))
 
-topNatTermsFound = all termInClasses (termsOf [] parsedNatEqs)
+topNatTermsFound = all termInClasses (termsOf [] eqs')
   where termsOf acc []          = acc
         termsOf acc (Eq l r:xs) = termsOf (l:r:acc) xs
         termInClasses t = let qs = any (renderTermN t natSig `elem`) natClasses
@@ -651,7 +662,10 @@ topNatTermsFound = all termInClasses (termsOf [] parsedNatEqs)
                                 (False, _)     -> error $ show t ++ " not in QS"
                                 (_, False)     -> error $ show t ++ " not in ours"
                                 _              -> True
-        clss = classesFromEqs parsedNatEqs
+        clss = classesFromEqs eqs'
+        eqs' = map (replaceEqTypes db) parsedNatEqs
+        db   = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Nat")),
+                 HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")))]
 
 qsNatTermsFound = case unfoundInOurs of
     [] -> True
@@ -858,9 +872,23 @@ instance Arbitrary Equations where
   shrink (Eqs eqs) = [Eqs eqs' | eqs' <- shrink eqs, consistentEqs eqs']
 
   arbitrary = do
-      eqs  <- arbitrary
-      eqs' <- renameEqs eqs
+      -- Make a bunch of terms and declare them equal
+      classEqs <- listOf mkClass
+      let eqs = concat classEqs
+
+      -- Pad out with filler
+      pre  <- arbitrary
+      post <- arbitrary
+
+      -- Make sure it's consistent
+      eqs' <- renameEqs (pre ++ eqs ++ post)
       return (Eqs eqs')
+    where mkClass = do
+            t  <- arbitrary
+            ts <- listOf (termOfType t)
+            return $ case ts of
+                          [] -> []
+                          (x:xs) -> [Eq x y | y <- xs]
 
 -- | Keep renaming constants until each name only refers to one type
 renameEqs eqs = if consistentEqs eqs
