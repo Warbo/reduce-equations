@@ -499,15 +499,9 @@ commProvable n1@(Name n) n2' i o = counterexample dbg result
 
 
 
-natEqsPruned = once $ monadicIO $ do
-  let raw = rawNatEqs
-      rawEqs = parsedNatEqs
-      (_, rawEqs') = replaceTypes rawEqs
-      sig          = renderN (sigFromEqs rawEqs')
-      classes      = unSomeClassesN rawEqs' sig
-      pruned       = unSomePruneN (sort . map sort $ classes) sig
-  monitor . counterexample . unlines . map show $ pruned
-  assert (length pruned < length rawEqs')
+natEqsPruned = length pruned < length rawEqs'
+  where (_, rawEqs') = replaceTypes parsedNatEqs
+        pruned       = pruneEqsN rawEqs'
 
 natEqsMatchQS = once $ monadicIO $ do
   expect <- run $ LB.readFile "test/data/nat-simple-expect.json"
@@ -523,10 +517,12 @@ natEqsMatchQS = once $ monadicIO $ do
                                        (("length foundEqs",  length foundEqs),
                                         ("length expectEqs", length expectEqs)))
   case setDiff foundEqs expectEqs of
-    Just diff -> do monitor . counterexample $ show (trc (show ("diff", diff))
-                                                         ("length diff", length diff))
-                    assert False
-    Nothing   -> assert True
+    ([], [])   -> assert True
+    (xs', ys') -> do monitor . counterexample . show $
+                       (("xs'", xs'),
+                        ("ys'", ys'),
+                        ("length diff", length xs' + length ys'))
+                     assert False
 
 extractedTypesUnique (Eqs eqs) = counterexample (show types)
                                                 (nub types == types)
@@ -541,8 +537,8 @@ convertTypesIso' (Eqs eqs) =
       conv   = map (qsEqToEq . Test.QuickSpec.Utils.Typed.some Test.QuickSpec.Equation.eraseEquation) qsEqs
       result = setEq eqs' conv
    in case setDiff eqs' conv of
-    Nothing -> property True
-    Just ((_, extraEqs'), (_, extraConv)) ->
+    ([], []) -> property True
+    (extraEqs', extraConv) ->
       counterexample (show (("qsEqs", map (Test.QuickSpec.Utils.Typed.some Test.QuickSpec.Equation.eraseEquation) qsEqs),
                             ("eqs'",  eqs'),
                             ("conv",  conv),
@@ -657,21 +653,20 @@ topNatTermsFound = all termInClasses (termsOf [] parsedNatEqs)
                                 _              -> True
         clss = classesFromEqs parsedNatEqs
 
-qsNatTermsFound = case (unfoundInOurs, unfoundInQS) of
-    ([], []) -> True
-    (us, qs) -> error (show (("unfound in ours", us),
-                             ("unfound in QS",   qs)))
+qsNatTermsFound = case unfoundInOurs of
+    [] -> True
+    us -> error (show ("unfound", us))
   where allTerms = concat (filter ((> 1) . length) natClasses)
 
-        clss = classesFromEqs parsedNatEqs
+        clss = classesFromEqs eqs'
 
         inOurs t = any (t `elem`) (map (map (`renderTermN` natSig)) clss)
 
-        inQS t = any (t `elem`) natClasses
-
         unfoundInOurs = filter (not . inOurs) allTerms
 
-        unfoundInQS   = filter (not . inQS)   allTerms
+        db   = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Nat")),
+                 HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")))]
+        eqs' = map (replaceEqTypes db) parsedNatEqs
 
 natClassesIncludeSingletons = any ((== 1) . length) natClasses
 
@@ -692,21 +687,17 @@ convertPrunes = length (doPrune qsClasses natSig') == 10
         db         = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")),
                        HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Z")))]
 
-parsedEqsPrune = counterexample (show (("ourPrune", ourPrune),
-                                       ("qsPrune",  qsPrune)))
-                                (case setDiff ours theirs of
-                                   Nothing -> True
-                                   Just ((_, us), (_, qs)) -> error (show (("us", us),
-                                                                           ("qs", qs))))
-  where qsPrune    = doPrune rawNatClasses natSig
-        ourPrune   = doPrune clss natSig'
-        clss       = unSomeClassesN2 eqs' (renderN (sigFromEqs eqs'))
-        (db, eqs') = replaceTypes parsedNatEqs
+-- We don't compare equations directly, since they may differ slightly e.g. due
+-- to commutativity
+parsedEqsPrune = nub [length ourPrune, length qsPrune] == [10]
+  where (db, eqs') = replaceTypes parsedNatEqs
+        ourPrune   = doPrune classes sig
+        classes    = unSomeClassesN2 eqs' sig
+        sig        = let sig'  = renderN (sigFromEqs eqs')
+                         sig'' = Test.QuickSpec.Signature.signature sig'
+                      in sig'' `mappend` Test.QuickSpec.Main.undefinedsSig sig''
 
-        fix        = replace "Natural" "Z"
-        ours       = map mkPair ourPrune
-        theirs     = map mkPair qsPrune
-        mkPair (l Test.QuickSpec.Equation.:=: r) = SP (fix (show l), fix (show r))
+        qsPrune    = doPrune rawNatClasses natSig
 
 manualNatReducesSelf = counterexample (show ("pruned", pruned))
                                       ((length pruned < 20) &&
@@ -768,13 +759,23 @@ genNormalisedEqs = do
 
 genNormalisedSig = sigFromEqs <$> genNormalisedEqs
 
-setEq xs ys = all (`elem` xs) ys && all (`elem` ys) xs
+setEq :: (Foldable t1, Foldable t2, Eq a) => t1 a -> t2 a -> Bool
+setEq = setEqBy (==)
 
-setDiff xs ys = if null (xs' ++ ys')
-                   then Nothing
-                   else Just (("xs", xs'), ("ys", ys'))
-  where xs' = filter (`notElem` ys) xs
-        ys' = filter (`notElem` xs) ys
+setEqBy :: (Foldable t1, Foldable t2) => (a -> b -> Bool) -> t1 a -> t2 b -> Bool
+setEqBy f xs ys = all (\y -> any (`f` y) xs) ys &&
+                  all (\x -> any (x `f`) ys) xs
+
+setDiff :: Eq a => [a] -> [a] -> ([a], [a])
+setDiff = setDiffBy (==)
+
+setDiffBy :: (a -> b -> Bool)
+          -> [a]
+          -> [b]
+          -> ([a], [b])
+setDiffBy f xs ys = (xs', ys')
+  where xs' = filter (\x -> not (any (x `f`) ys)) xs
+        ys' = filter (\y -> not (any (`f` y) xs)) ys
 
 endsInTrue x = case x of
   Nothing -> False
@@ -1171,31 +1172,6 @@ doReps clss = map (Test.QuickSpec.Utils.Typed.some2
                     (Test.QuickSpec.Utils.Typed.tagged term . head))
                   clss
 
-doPrune clss sig = pruned
-  where univ = concatMap (Test.QuickSpec.Utils.Typed.some2
-                           (map (Test.QuickSpec.Utils.Typed.tagged term)))
-                         clss
-        reps = map (Test.QuickSpec.Utils.Typed.some2
-                     (Test.QuickSpec.Utils.Typed.tagged term . head))
-                   clss
-        eqs  = Test.QuickSpec.Equation.equations clss
-
-        ctx  = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
-                 (Test.QuickSpec.Signature.maxDepth sig)
-                 (Test.QuickSpec.Signature.symbols sig)
-                 univ
-
-        allEqs = map (Test.QuickSpec.Utils.Typed.some
-                       Test.QuickSpec.Equation.eraseEquation)
-                     eqs
-
-        pruned = Test.QuickSpec.Main.prune
-                   ctx
-                   (filter (not . Test.QuickSpec.Term.isUndefined)
-                           (map Test.QuickSpec.Utils.Typed.erase reps))
-                   id
-                   allEqs
-
 natClasses = map (Test.QuickSpec.Utils.Typed.several
                    (map Test.QuickSpec.Term.term))
                  rawNatClasses
@@ -1221,6 +1197,7 @@ swapTypes' db = map (Test.QuickSpec.Utils.Typed.several
                                                          })
                                                        xs))))
 
+rawNatClasses :: [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
 rawNatClasses = concatMap (Test.QuickSpec.Utils.Typed.some2
                             (map (Test.QuickSpec.Utils.Typed.Some .
                                   Test.QuickSpec.Utils.Typed.O)   .
@@ -1277,12 +1254,6 @@ replaceQSType db t =
                                "'. Error is: ",
                                e])
         prnt = replaceInType db . prs
-
-newtype StringPair = SP (String, String) deriving (Show)
-
-instance Eq StringPair where
-  (SP (x1, y1)) == (SP (x2, y2)) = (x1 == x2 && y1 == y2) ||
-                                   (x1 == y2 && y1 == x2)
 
 naturalDb = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")),
              HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Z")))]

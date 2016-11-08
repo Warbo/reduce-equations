@@ -970,16 +970,13 @@ pruneEqs' f eqs = exec main''
                            "instance (Ord a) => Ord (S a) where { compare (Main.S x) (Main.S y) = Prelude.compare x y; };"]
 
 pruneEqsN :: [Equation] -> [Equation]
-pruneEqsN eqs = trc ("pruneEqsN pruned",  pruned)  .
-                trc ("pruneEqsN classes", classes) .
-                trc ("pruneEqsN sig",     sig)     $
-                result
-  where pruned  = unSomePruneN classes sig
+pruneEqsN eqs = result
+  where pruned  = doPrune classes sig
         sig     = let sig'  = renderN (sigFromEqs eqs)
                       sig'' = Test.QuickSpec.Signature.signature sig'
                    in sig'' `mappend` Test.QuickSpec.Main.undefinedsSig sig''
         result  = showEqsOnLinesN pruned
-        classes = unSomeClassesN eqs sig
+        classes = unSomeClassesN2 eqs sig
 
 dumpSym s = (("index"       :: String, Test.QuickSpec.Term.index       s),
              ("name"        :: String, Test.QuickSpec.Term.name        s),
@@ -1023,3 +1020,28 @@ provable reps (t Test.QuickSpec.Equation.:=: u) = do
           else do
             Test.QuickSpec.Reasoning.NaiveEquationalReasoning.put state
             return True
+
+doPrune clss sig = pruned
+  where univ = concatMap (Test.QuickSpec.Utils.Typed.some2
+                           (map (Test.QuickSpec.Utils.Typed.tagged term)))
+                         clss
+        reps = map (Test.QuickSpec.Utils.Typed.some2
+                     (Test.QuickSpec.Utils.Typed.tagged term . head))
+                   clss
+        eqs  = Test.QuickSpec.Equation.equations clss
+
+        ctx  = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
+                 (Test.QuickSpec.Signature.maxDepth sig)
+                 (Test.QuickSpec.Signature.symbols sig)
+                 univ
+
+        allEqs = map (Test.QuickSpec.Utils.Typed.some
+                       Test.QuickSpec.Equation.eraseEquation)
+                     eqs
+
+        pruned = Test.QuickSpec.Main.prune
+                   ctx
+                   (filter (not . Test.QuickSpec.Term.isUndefined)
+                           (map Test.QuickSpec.Utils.Typed.erase reps))
+                   id
+                   allEqs
