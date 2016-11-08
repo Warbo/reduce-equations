@@ -11,6 +11,7 @@ import           Data.Maybe
 import qualified Data.Sequence                as Seq
 import qualified Data.Stringable              as S
 import qualified Data.String                  as DS
+import           Data.String.Utils
 import           Data.Text.Encoding
 import           Data.Typeable
 import           Language.Eval.Internal
@@ -102,7 +103,6 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Class contents match exactly"    exactClassMatch
   , testProperty "Pruned eqs match"                parsedEqsPrune
   , testProperty "Fresh Nat reduces own eqs"       manualNatReducesSelf
-  , testProperty "Manual Nat reduces given"        manualNatReducesGiven
   ]
 
 -- Tests
@@ -678,76 +678,44 @@ natClassesIncludeSingletons = any ((== 1) . length) natClasses
 -- We compare the "show" output, to avoid irrelevant details like symbol indices
 exactClassMatch = counterexample (show (("ourClasses", ourClasses),
                                         ("qsClasses'", qsClasses')))
-                                 (show ourClasses == show qsClasses')
+                                 (ourClasses == qsClasses')
   where ourClasses = map (Test.QuickSpec.Utils.Typed.several (map term))
                          (unSomeClassesN2 parsedNatEqs' natSig')
         qsClasses  = filter ((> 1) . length) natClasses
-        qsClasses' = replaceQSTypes db qsClasses
+        qsClasses' = replaceQSTypes naturalDb qsClasses
+
+convertPrunes = length (doPrune qsClasses natSig') == 10
+  where qsClasses  = filter (Test.QuickSpec.Utils.Typed.several ((> 1) . length))
+                            rawNatClasses'
+        --qsClasses' = replaceQSTypes db qsClasses
+        --qsClasses' = unSomeSortedQSClasses qsClasses
         db         = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")),
                        HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Z")))]
 
-replaceQSTypes :: [(Type, Type)] -> [[Test.QuickSpec.Term.Term]] -> [[Test.QuickSpec.Term.Term]]
-replaceQSTypes db = map rep
-  where rep = map (replaceQSType db)
+parsedEqsPrune = counterexample (show (("ourPrune", ourPrune),
+                                       ("qsPrune",  qsPrune)))
+                                (case setDiff ours theirs of
+                                   Nothing -> True
+                                   Just ((_, us), (_, qs)) -> error (show (("us", us),
+                                                                           ("qs", qs))))
+  where qsPrune    = doPrune rawNatClasses natSig
+        ourPrune   = doPrune clss natSig'
+        clss       = unSomeClassesN2 eqs' (renderN (sigFromEqs eqs'))
+        (db, eqs') = replaceTypes parsedNatEqs
 
-replaceQSType db t =
-    case t of
-         Test.QuickSpec.Term.Var   s -> Test.QuickSpec.Term.Var (
-           let ty = prnt (Test.QuickSpec.Utils.Typeable.unTypeRep
-                           (Test.QuickSpec.Term.symbolType s))
-               tr = repToQSRep (getRep ty)
-               n = let suf = reverse
-                               (takeWhile (/= ',')
-                                 (reverse (Test.QuickSpec.Term.name s)))
-                       idx = read (init suf) :: Int
-                    in unName (varName (Var
-                         ty
-                         idx
-                         (Arity (Test.QuickSpec.Term.symbolArity s))))
-            in s {
-             Test.QuickSpec.Term.symbolType = tr,
-             Test.QuickSpec.Term.name = n
-           })
-         Test.QuickSpec.Term.Const s -> Test.QuickSpec.Term.Const (s {
-             Test.QuickSpec.Term.symbolType =
-               repToQSRep
-                 (getRep
-                   (prnt (Test.QuickSpec.Utils.Typeable.unTypeRep
-                           (Test.QuickSpec.Term.symbolType s))))
-           })
-         Test.QuickSpec.Term.App l r -> Test.QuickSpec.Term.App
-           (replaceQSType db l)
-           (replaceQSType db r)
-  where prs x = case HSE.Parser.parseType (show x) of
-          HSE.Parser.ParseOk typ -> unwrapParens (fmap (const ()) typ)
-          HSE.Parser.ParseFailed _ e -> error (concat [
-                               "Failed to replace QuickSpec type '",
-                               show t,
-                               "'. Error is: ",
-                               e])
-        prnt = replaceInType db . prs
-
-parsedEqsPrune = counterexample (show ourPrune) (setEq ourPrune qsPrune)
-  where ourPrune = doPrune clss
-        qsPrune  = doPrune rawNatClasses
-        clss     = unSomeClassesN2 parsedNatEqs' natSig'
+        fix        = replace "Natural" "Z"
+        ours       = map mkPair ourPrune
+        theirs     = map mkPair qsPrune
+        mkPair (l Test.QuickSpec.Equation.:=: r) = SP (fix (show l), fix (show r))
 
 manualNatReducesSelf = counterexample (show ("pruned", pruned))
                                       ((length pruned < 20) &&
                                        (length pruned > 1))
-  where pruned = doPrune rawNatClasses
+  where pruned = doPrune rawNatClasses natSig
 
-manualNatReducesGiven = once . monadicIO $ do
-  let clss         = classesFromEqs parsedNatEqs
-      clss' :: [[Test.QuickSpec.Term.Expr Natural]]
-      clss'        = sort (map (sort . mkUnSomeClassN natSig) clss)
-      clss''       = map (Test.QuickSpec.Utils.Typed.Some .
-                            Test.QuickSpec.Utils.Typed.O) clss'
-      pruned = doPrune clss''
+-- Helpers
 
-  assert (length pruned < length parsedNatEqs)
-
-pruneWithSingletons = doPrune clss
+pruneWithSingletons = doPrune clss natSig
   where clss    = lhs ++ rhs
         rawClss = unSomeClassesN parsedNatEqs natSig  :: [[Test.QuickSpec.Term.Expr Natural]]
         lhs     = map (Test.QuickSpec.Utils.Typed.Some .
@@ -757,14 +725,12 @@ pruneWithSingletons = doPrune clss
                             ((== 1) . length))
                           rawNatClasses
 
--- Helpers
-
 natSig = mconcat [
   Test.QuickSpec.Signature.fun0 "cZ"    (0    :: Natural),
   Test.QuickSpec.Signature.fun1 "cS"    ((+1) :: Natural -> Natural),
   Test.QuickSpec.Signature.fun2 "plus"  ((+)  :: Natural -> Natural -> Natural),
   Test.QuickSpec.Signature.fun2 "times" ((*)  :: Natural -> Natural -> Natural),
-  Test.QuickSpec.Signature.gvars (map (\n -> "(var, Nat, " ++ show n ++ ")")
+  Test.QuickSpec.Signature.gvars (map (\n -> "(var, Natural, " ++ show n ++ ")")
                                       [0, 1, 2])
     (((fromInteger . abs) <$> arbitrary) :: Gen Natural)]
 
@@ -1201,7 +1167,11 @@ Right parsedNatEqs = eitherDecode rawNatEqs :: Either String [Equation]
 
 (typeDb, parsedNatEqs') = replaceTypes parsedNatEqs
 
-doPrune clss = pruned
+doReps clss = map (Test.QuickSpec.Utils.Typed.some2
+                    (Test.QuickSpec.Utils.Typed.tagged term . head))
+                  clss
+
+doPrune clss sig = pruned
   where univ = concatMap (Test.QuickSpec.Utils.Typed.some2
                            (map (Test.QuickSpec.Utils.Typed.tagged term)))
                          clss
@@ -1211,8 +1181,8 @@ doPrune clss = pruned
         eqs  = Test.QuickSpec.Equation.equations clss
 
         ctx  = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
-                 (Test.QuickSpec.Signature.maxDepth natSig)
-                 (Test.QuickSpec.Signature.symbols natSig)
+                 (Test.QuickSpec.Signature.maxDepth sig)
+                 (Test.QuickSpec.Signature.symbols sig)
                  univ
 
         allEqs = map (Test.QuickSpec.Utils.Typed.some
@@ -1230,6 +1200,27 @@ natClasses = map (Test.QuickSpec.Utils.Typed.several
                    (map Test.QuickSpec.Term.term))
                  rawNatClasses
 
+
+rawNatClasses' = swapTypes' naturalDb rawNatClasses
+
+swapTypes' db = map (Test.QuickSpec.Utils.Typed.several
+                      (\xs -> let trep = head (typeRepArgs (typeRep xs))  -- Strip off [] and Expr
+                                  typ  = case HSE.Parser.parseType (show trep) of
+                                    HSE.Parser.ParseOk x -> unwrapParens (fmap (const ()) x)
+                                  typ' = replaceInType db typ
+                               in case getVal (getRep typ') of
+                                    MkHT x -> Test.QuickSpec.Utils.Typed.Some
+                                                (Test.QuickSpec.Utils.Typed.O
+                                                  (map (\e -> let trm = replaceQSType db (Test.QuickSpec.Term.term e)
+                                                               in e {
+                                                           Test.QuickSpec.Term.term = trm,
+                                                           Test.QuickSpec.Term.eval = \env -> case trm of
+                                                               Test.QuickSpec.Term.Var   s -> Test.QuickSpec.Term.unValuation env (Test.QuickSpec.Term.Variable (Test.QuickSpec.Term.Atom s (Test.QuickSpec.Term.pgen (return x))))
+                                                               Test.QuickSpec.Term.Const s -> x
+                                                               Test.QuickSpec.Term.App l r -> x --(Test.QuickSpec.Term.eval e) env
+                                                         })
+                                                       xs))))
+
 rawNatClasses = concatMap (Test.QuickSpec.Utils.Typed.some2
                             (map (Test.QuickSpec.Utils.Typed.Some .
                                   Test.QuickSpec.Utils.Typed.O)   .
@@ -1245,3 +1236,53 @@ tType (Test.QuickSpec.Term.Const s) = Test.QuickSpec.Utils.Typeable.unTypeRep (T
 tType (Test.QuickSpec.Term.App l r) = case funResultTy (tType l) (tType r) of
   Nothing -> error ("Incompatible types (" ++ show (tType l) ++ ") (" ++ show (tType r) ++ ")")
   Just t  -> t
+
+replaceQSTypes :: [(Type, Type)] -> [[Test.QuickSpec.Term.Term]] -> [[Test.QuickSpec.Term.Term]]
+replaceQSTypes db = map rep
+  where rep = map (replaceQSType db)
+
+replaceQSType db t =
+    case t of
+         Test.QuickSpec.Term.Var   s -> Test.QuickSpec.Term.Var (
+           let ty = prnt (Test.QuickSpec.Utils.Typeable.unTypeRep
+                           (Test.QuickSpec.Term.symbolType s))
+               tr = repToQSRep (getRep ty)
+               n = let suf = reverse
+                               (takeWhile (/= ',')
+                                 (reverse (Test.QuickSpec.Term.name s)))
+                       idx = read (init suf) :: Int
+                    in unName (varName (Var
+                         ty
+                         idx
+                         (Arity (Test.QuickSpec.Term.symbolArity s))))
+            in s {
+             Test.QuickSpec.Term.symbolType = tr,
+             Test.QuickSpec.Term.name = n
+           })
+         Test.QuickSpec.Term.Const s -> Test.QuickSpec.Term.Const (s {
+             Test.QuickSpec.Term.symbolType =
+               repToQSRep
+                 (getRep
+                   (prnt (Test.QuickSpec.Utils.Typeable.unTypeRep
+                           (Test.QuickSpec.Term.symbolType s))))
+           })
+         Test.QuickSpec.Term.App l r -> Test.QuickSpec.Term.App
+           (replaceQSType db l)
+           (replaceQSType db r)
+  where prs x = case HSE.Parser.parseType (show x) of
+          HSE.Parser.ParseOk typ -> unwrapParens (fmap (const ()) typ)
+          HSE.Parser.ParseFailed _ e -> error (concat [
+                               "Failed to replace QuickSpec type '",
+                               show t,
+                               "'. Error is: ",
+                               e])
+        prnt = replaceInType db . prs
+
+newtype StringPair = SP (String, String) deriving (Show)
+
+instance Eq StringPair where
+  (SP (x1, y1)) == (SP (x2, y2)) = (x1 == x2 && y1 == y2) ||
+                                   (x1 == y2 && y1 == x2)
+
+naturalDb = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")),
+             HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Z")))]

@@ -61,6 +61,7 @@ test-suite test
                      , aeson
                      , bytestring
                      , haskell-src-exts >= 1.18.2
+                     , MissingH
                      , nix-eval
                      , stringable
                      , containers

@@ -649,11 +649,16 @@ unSomeClassesN2 :: [Equation]
                 -> [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
 unSomeClassesN2 eqs sig = collectExprs result
   where classes  = classesFromEqs eqs
-        unsorted = map (mkUnSomeClassN2 sig) classes
-        result   = sortBy multi (map (sortBy single) unsorted)
-        single (Test.QuickSpec.Utils.Typed.Some x) (Test.QuickSpec.Utils.Typed.Some y) =
-          compare (Test.QuickSpec.Term.term x) (Test.QuickSpec.Term.term y)
-        multi (x:_) (y:_) = single x y
+        result   = unSomeSortedClasses classes sig
+
+unSomeSortedClasses classes sig =
+  unSomeSortedQSClasses (map (mkUnSomeClassN2 sig) classes)
+
+unSomeSortedQSClasses classes = sortBy multi classes
+  where multi (x:_) (y:_) = compareTerms x y
+
+compareTerms (Test.QuickSpec.Utils.Typed.Some x) (Test.QuickSpec.Utils.Typed.Some y) =
+  compare (Test.QuickSpec.Term.term x) (Test.QuickSpec.Term.term y)
 
 collectExprs :: [[Test.QuickSpec.Utils.Typed.Some Test.QuickSpec.Term.Expr]]
         -> [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
@@ -686,8 +691,10 @@ mkUnSomeClassN sig (x:xs) = termToExprN x sig : mkUnSomeClassN sig xs
 mkUnSomeClassN2 :: Test.QuickSpec.Signature.Sig
                 -> [Term]
                 -> [Test.QuickSpec.Utils.Typed.Some Test.QuickSpec.Term.Expr]
-mkUnSomeClassN2 sig []     = []
-mkUnSomeClassN2 sig (x:xs) =
+mkUnSomeClassN2 sig trms = sortBy compareTerms (mkUnSomeClassN2' sig trms)
+
+mkUnSomeClassN2' sig []     = []
+mkUnSomeClassN2' sig (x:xs) =
     case termType (setForTerm x) of
          Nothing -> error ("No type for " ++ show x)
          Just t  -> case getVal (getRep t) of
@@ -697,7 +704,7 @@ mkUnSomeClassN2 sig (x:xs) =
                                                                (const v))) : xs'
   where term        = renderTermN x sig
         Arity arity = termArity x
-        xs' = mkUnSomeClassN2 sig xs
+        xs' = mkUnSomeClassN2' sig xs
 
 unSomePrune :: [WithSig [Test.QuickSpec.Term.Expr a]] -> WithSig [Test.QuickSpec.Equation.Equation]
 unSomePrune clss = WS ((((prune' $$$ arg1) $$$ arg2) $$$ id') $$$ arg3)
@@ -759,9 +766,9 @@ classesToReps2 :: [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
                -> [Test.QuickSpec.Term.Term]
 classesToReps2 clss = filter (not . Test.QuickSpec.Term.isUndefined) reps
   where reps = map (Test.QuickSpec.Utils.Typed.several getRep) clss
-        getRep :: [{-Test.QuickSpec.Utils.Typed.Some-} Test.QuickSpec.Term.Expr a]
+        getRep :: [Test.QuickSpec.Term.Expr a]
                -> Test.QuickSpec.Term.Term
-        getRep ({-Test.QuickSpec.Utils.Typed.Some-} x:_) = term x
+        getRep (x:_) = term x
 
 unSomePruneEqs :: [[Test.QuickSpec.Term.Expr Term]]
                -> Test.QuickSpec.Signature.Sig
