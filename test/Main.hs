@@ -12,6 +12,7 @@ import qualified Data.Sequence                as Seq
 import qualified Data.Stringable              as S
 import qualified Data.String                  as DS
 import           Data.Text.Encoding
+import           Data.Typeable
 import           Language.Eval.Internal
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Math.Equation.Internal
@@ -28,6 +29,7 @@ import qualified Test.QuickSpec.Reasoning.CongruenceClosure
 import qualified Test.QuickSpec.Reasoning.NaiveEquationalReasoning
 import qualified Test.QuickSpec.Signature
 import qualified Test.QuickSpec.TestTree
+import qualified Test.QuickSpec.Utils.Typeable
 import qualified Test.QuickSpec.Utils.Typed
 import qualified Test.QuickSpec.Utils.TypeMap
 import qualified Test.QuickSpec.Term
@@ -35,63 +37,71 @@ import           Test.Tasty            (defaultMain, testGroup, localOption)
 import           Test.Tasty.QuickCheck
 
 main = defaultMain $ testGroup "All tests" [
-    testProperty "Can parse equations"          canParseEquations
-  , testProperty "Can parse terms"              canParseTerms
-  , testProperty "Can parse variables"          canParseVars
-  , testProperty "Can parse constants"          canParseConsts
-  , testProperty "Can parse examples"           canParseExamples
-  , testProperty "Can evaluate examples"        canEvalExamples
-  , testProperty "Can make example signature"   canMakeSignature
-  , testProperty "Constants added"              constantsAdded
-  , testProperty "Variables added"              variablesAdded
-  , testProperty "Sigs render"                  sigsRender
-  , testProperty "Sigs have constants"          sigsHaveConsts
-  , testProperty "Sigs have variables"          sigsHaveVars
-  , testProperty "Constants are distinct"       sigConstsUniqueIndices
-  , testProperty "Variables are distinct"       sigVarsUniqueIndices
-  , testProperty "Can find closure of term"     canFindClosure
-  , testProperty "No classes without equations" noClassesFromEmptyEqs
-  , testProperty "Equation induces a class"     getClassFromEq
-  , testProperty "Classes contain given terms"  classesHaveTerms
-  , testProperty "Equal terms in same class"    eqPartsAppearInSameClass
-  , testProperty "Terms appear in one class"    classesHaveNoDupes
-  , testProperty "Class elements are equal"     classElementsAreEqual
-  , testProperty "Non-equal elements separate"  nonEqualElementsSeparate
-  , testProperty "Classes have one arity"       classHasSameArity
-  , testProperty "Class length more than one"   classesNotSingletons
-  , testProperty "Can get classes from sig"     canGetClassesFromEqs
-  , testProperty "Can get sig from equations"   canGetSigFromEqs
-  , testProperty "Sig has equation variables"   eqSigHasVars
-  , testProperty "Sig has equation constants"   eqSigHasConsts
-  , testProperty "Equations have one arity"     equationsHaveSameArity
-  , testProperty "Can render equations"         canRenderEqs
-  , testProperty "Can get type of terms"        canGetTermType
-  , testProperty "No trivial terms"             noTrivialTerms
-  , testProperty "Equations are consistent"     eqsAreConsistent
-  , testProperty "Switch function types"        switchFunctionTypes
-  , testProperty "Can prune equations"          canPruneEqs
-  , testProperty "Type parsing regression"      regressionTypeParse
-  , testProperty "Nat example has eqs"          natHasEqs
-  , testProperty "Nat example outputs eqs"      natKeepsEqs
-  , testProperty "Nat classes are nontrivial"   natClassesNontrivial
-  , testProperty "Commutativity is nontrivial"  commClassesNontrivial
-  , testProperty "Commutativity prunes"         commPruned
-  , testProperty "Nat equations are pruned"     natEqsPruned
-  , testProperty "Reduction matches QuickSpec"  natEqsMatchQS
-  , testProperty "Replacement types unique"     extractedTypesUnique
-  , testProperty "QuickSpec conversions invert" convertTypesIso
-  , testProperty "Symmetric equations equal"    eqsSymmetric
-  , testProperty "Spot symmetric equations"     eqsSetEq
-  , testProperty "Can generate eq variables"    canMakeVars
-  , testProperty "Can generate var QS sigs"     canMakeQSSigs
-  , testProperty "Can find vars in sig"         lookupVars
-  , testProperty "Can prune"                    justPrune
-  , testProperty "New reduce"                   newReduce
-  , testProperty "Reduce is idempotent"         reduceIdem
-  , testProperty "Redundant transitivity"       transStripped
-  , testProperty "Generated terms have type"    termsHaveType
-  , testProperty "Manual Nat finds eqs"         manualNatFindsEqs
-  , testProperty "Manual Nat reduces given"     manualNatReducesGiven
+    testProperty "Can parse equations"             canParseEquations
+  , testProperty "Can parse terms"                 canParseTerms
+  , testProperty "Can parse variables"             canParseVars
+  , testProperty "Can parse constants"             canParseConsts
+  , testProperty "Can parse examples"              canParseExamples
+  , testProperty "Can evaluate examples"           canEvalExamples
+  , testProperty "Can make example signature"      canMakeSignature
+  , testProperty "Constants added"                 constantsAdded
+  , testProperty "Variables added"                 variablesAdded
+  , testProperty "Sigs render"                     sigsRender
+  , testProperty "Sigs have constants"             sigsHaveConsts
+  , testProperty "Sigs have variables"             sigsHaveVars
+  , testProperty "Constants are distinct"          sigConstsUniqueIndices
+  , testProperty "Variables are distinct"          sigVarsUniqueIndices
+  , testProperty "Can find closure of term"        canFindClosure
+  , testProperty "No classes without equations"    noClassesFromEmptyEqs
+  , testProperty "Equation induces a class"        getClassFromEq
+  , testProperty "Classes contain given terms"     classesHaveTerms
+  , testProperty "Equal terms in same class"       eqPartsAppearInSameClass
+  , testProperty "Terms appear in one class"       classesHaveNoDupes
+  , testProperty "Class elements are equal"        classElementsAreEqual
+  , testProperty "Non-equal elements separate"     nonEqualElementsSeparate
+  , testProperty "Classes have one arity"          classHasSameArity
+  , testProperty "Class length more than one"      classesNotSingletons
+  , testProperty "Can get classes from sig"        canGetClassesFromEqs
+  , testProperty "Can get sig from equations"      canGetSigFromEqs
+  , testProperty "Sig has equation variables"      eqSigHasVars
+  , testProperty "Sig has equation constants"      eqSigHasConsts
+  , testProperty "Equations have one arity"        equationsHaveSameArity
+  , testProperty "Can render equations"            canRenderEqs
+  , testProperty "Can get type of terms"           canGetTermType
+  , testProperty "No trivial terms"                noTrivialTerms
+  , testProperty "Equations are consistent"        eqsAreConsistent
+  , testProperty "Switch function types"           switchFunctionTypes
+  , testProperty "Can prune equations"             canPruneEqs
+  , testProperty "Type parsing regression"         regressionTypeParse
+  , testProperty "Nat example has eqs"             natHasEqs
+  , testProperty "Nat example outputs eqs"         natKeepsEqs
+  , testProperty "Nat classes are nontrivial"      natClassesNontrivial
+  , testProperty "Commutativity is nontrivial"     commClassesNontrivial
+  , testProperty "Commutativity prunes"            commPruned
+  , testProperty "Nat equations are pruned"        natEqsPruned
+  , testProperty "Reduction matches QuickSpec"     natEqsMatchQS
+  , testProperty "Replacement types unique"        extractedTypesUnique
+  , testProperty "QuickSpec conversions invert"    convertTypesIso
+  , testProperty "Symmetric equations equal"       eqsSymmetric
+  , testProperty "Spot symmetric equations"        eqsSetEq
+  , testProperty "Can generate eq variables"       canMakeVars
+  , testProperty "Can generate var QS sigs"        canMakeQSSigs
+  , testProperty "Can find vars in sig"            lookupVars
+  , testProperty "Can prune"                       justPrune
+  , testProperty "New reduce"                      newReduce
+  , testProperty "Reduce is idempotent"            reduceIdem
+  , testProperty "Redundant transitivity"          transStripped
+  , testProperty "Generated terms have type"       termsHaveType
+  , testProperty "Manual Nat finds eqs"            manualNatFindsEqs
+  , testProperty "Fresh sig + parsed eqs works"    manualNatAllowsGiven
+  , testProperty "Fresh classes match parsed"      manualNatClassesMatch
+  , testProperty "Fresh classes have parsed terms" topNatTermsFound
+  , testProperty "Parsed classes have fresh terms" qsNatTermsFound
+  , testProperty "Singleton classes generated"     natClassesIncludeSingletons
+  , testProperty "Class contents match exactly"    exactClassMatch
+  , testProperty "Pruned eqs match"                parsedEqsPrune
+  , testProperty "Fresh Nat reduces own eqs"       manualNatReducesSelf
+  , testProperty "Manual Nat reduces given"        manualNatReducesGiven
   ]
 
 -- Tests
@@ -461,7 +471,7 @@ commProvable n1@(Name n) n2' i o = counterexample dbg result
             "ctx "  ++ show ctx
           , "ctx' " ++ show ctx'
           ]
-        ctx  = mkCxt classes sig
+        ctx  = mkCxt3 classes sig
         prov = provable reps (l' Test.QuickSpec.Equation.:=: r')
 
         f = C $ Const (Arity 2) n1 (HSE.Syntax.TyFun () i (HSE.Syntax.TyFun () i o))
@@ -483,8 +493,8 @@ commProvable n1@(Name n) n2' i o = counterexample dbg result
           ]
 
         sig     = renderN (sigFromEqs eqs')
-        classes = unSomeClassesN eqs' sig
-        reps    = classesToReps classes
+        classes = unSomeClassesN2 eqs' sig
+        reps    = classesToReps2 classes
 
 
 
@@ -524,15 +534,15 @@ extractedTypesUnique (Eqs eqs) = counterexample (show types)
 convertTypesIso = once (forAll (resize 20 arbitrary) convertTypesIso')
 convertTypesIso' (Eqs eqs) =
   let (_, eqs') = replaceTypes eqs
-      qsEqs  = sort (mkEqs2N clss)
+      qsEqs  = Test.QuickSpec.Equation.equations clss
       sig    = renderN (sigFromEqs eqs')
-      clss   = unSomeClassesN eqs' sig
-      conv   = map qsEqToEq qsEqs
+      clss   = unSomeClassesN2 eqs' sig
+      conv   = map (qsEqToEq . Test.QuickSpec.Utils.Typed.some Test.QuickSpec.Equation.eraseEquation) qsEqs
       result = setEq eqs' conv
    in case setDiff eqs' conv of
     Nothing -> property True
     Just ((_, extraEqs'), (_, extraConv)) ->
-      counterexample (show (("qsEqs", qsEqs),
+      counterexample (show (("qsEqs", map (Test.QuickSpec.Utils.Typed.some Test.QuickSpec.Equation.eraseEquation) qsEqs),
                             ("eqs'",  eqs'),
                             ("conv",  conv),
                             ("sig",   sig),
@@ -604,19 +614,9 @@ termsHaveType ty = forAll (termOfType ty) checkType
 manualNatFindsEqs = once . monadicIO $ do
   -- Our raw equations, for comparison
   let rawEqs = parsedNatEqs
-
-  -- Taken from the main 'quickSpec' function
-  r <- run $ Test.QuickSpec.Generate.generate
-               False
-               (const Test.QuickSpec.Term.partialGen)
-               natSig
-
-  let clss  = concatMap (Test.QuickSpec.Utils.Typed.some2
-                           (map (Test.QuickSpec.Utils.Typed.Some .
-                                 Test.QuickSpec.Utils.Typed.O)   . Test.QuickSpec.TestTree.classes))
-                        (Test.QuickSpec.Utils.TypeMap.toList r)
-      eqs  = Test.QuickSpec.Equation.equations clss
-      eqs' = dbgEqs eqs
+      clss   = rawNatClasses
+      eqs    = Test.QuickSpec.Equation.equations clss
+      eqs'   = dbgEqs eqs
   monitor . counterexample . show $ ("eqs'", eqs')
 
   -- Our golden input should match these
@@ -674,84 +674,42 @@ qsNatTermsFound = case (unfoundInOurs, unfoundInQS) of
 
 natClassesIncludeSingletons = any ((== 1) . length) natClasses
 
-{-
-Should fail
-natSubTermsFound = case (unfoundInOurs, unfoundInQS) of
-    ([], []) -> True
-    (us, qs) -> error (show (("unfound in ours", us),
-                             ("unfound in QS",   qs)))
-  where allTerms = allTermsOf [] parsedNatEqs
+exactClassMatch = ourClasses == qsClasses
+  where ourClasses = map (map term) (unSomeClassesN parsedNatEqs natSig :: [[Test.QuickSpec.Term.Expr Test.QuickSpec.Term.Term]])
+        qsClasses  = filter ((> 1) . length) natClasses
 
-        allTermsOf acc []          = acc
-        allTermsOf acc (Eq l r:xs) = allTermsOf (l:r:acc ++ subTerms l ++ subTerms r) xs
+parsedEqsPrune = counterexample (show ourPrune) (setEq ourPrune qsPrune)
+  where ourPrune = doPrune clss
+        qsPrune  = doPrune rawNatClasses
+        clss     = map (Test.QuickSpec.Utils.Typed.Some .
+                        Test.QuickSpec.Utils.Typed.O)
+                       rawClss
+        rawClss  = unSomeClassesN parsedNatEqs natSig :: [[Test.QuickSpec.Term.Expr Test.QuickSpec.Term.Term]]
 
-        subTerms (C _)       = []
-        subTerms (V _)       = []
-        subTerms (App l r _) = l : r : subTerms l ++ subTerms r
-
-        clss = classesFromEqs parsedNatEqs
-
-        inOurs t = any (t `elem`) clss
-
-        inQS t = any (renderTermN t natSig `elem`) natClasses
-
-        unfoundInOurs = filter (not . inOurs) allTerms
-
-        unfoundInQS   = filter (not . inQS)   allTerms
--}
-
-manualNatReducesSelf = once . monadicIO $ do
-  -- Taken from the main 'quickSpec' function
-  r <- run $ Test.QuickSpec.Generate.generate
-               False
-               (const Test.QuickSpec.Term.partialGen)
-               natSig
-
-  let rawEqs = parsedNatEqs
-      clss = concatMap (Test.QuickSpec.Utils.Typed.some2
-                          (map (Test.QuickSpec.Utils.Typed.Some .
-                                Test.QuickSpec.Utils.Typed.O)   . Test.QuickSpec.TestTree.classes))
-                       (Test.QuickSpec.Utils.TypeMap.toList r)
-
-      pruned = doPrune clss
-
-      -- For debugging
-      eqs' = pruned
-  monitor . counterexample . show $ ("eqs'", eqs')
-  assert False
+manualNatReducesSelf = counterexample (show ("pruned", pruned))
+                                      ((length pruned < 20) &&
+                                       (length pruned > 1))
+  where pruned = doPrune rawNatClasses
 
 manualNatReducesGiven = once . monadicIO $ do
-  let raw = rawNatEqs
-      rawEqs = parsedNatEqs
-      clss         = classesFromEqs rawEqs
-      clss' :: [[Test.QuickSpec.Term.Expr Test.QuickSpec.Term.Term]]
+  let clss         = classesFromEqs parsedNatEqs
+      clss' :: [[Test.QuickSpec.Term.Expr Natural]]
       clss'        = sort (map (sort . mkUnSomeClassN natSig) clss)
       clss''       = map (Test.QuickSpec.Utils.Typed.Some .
                             Test.QuickSpec.Utils.Typed.O) clss'
-      --eqs'         = unSomePruneN clss' natSig
+      pruned = doPrune clss''
 
-      univ   = concatMap (Test.QuickSpec.Utils.Typed.some2
-                           (map (Test.QuickSpec.Utils.Typed.tagged term)))
-                         clss''
-      reps   = map (Test.QuickSpec.Utils.Typed.some2
-                     (Test.QuickSpec.Utils.Typed.tagged term . head)) clss''
-      eqs    = Test.QuickSpec.Equation.equations clss''
-      ctx    = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
-                 (Test.QuickSpec.Signature.maxDepth natSig)
-                 (Test.QuickSpec.Signature.symbols natSig)
-                 univ
-      allEqs = map (Test.QuickSpec.Utils.Typed.some
-                     Test.QuickSpec.Equation.eraseEquation)
-                   eqs
-      pruned = Test.QuickSpec.Main.prune
-                 ctx
-                 (filter (not . Test.QuickSpec.Term.isUndefined)
-                         (map Test.QuickSpec.Utils.Typed.erase reps))
-                 id
-                 allEqs
+  assert (length pruned < length parsedNatEqs)
 
-  monitor (counterexample (show (dbgEqs eqs)))
-  assert (length pruned < length rawEqs)
+pruneWithSingletons = doPrune clss
+  where clss    = lhs ++ rhs
+        rawClss = unSomeClassesN parsedNatEqs natSig  :: [[Test.QuickSpec.Term.Expr Natural]]
+        lhs     = map (Test.QuickSpec.Utils.Typed.Some .
+                         Test.QuickSpec.Utils.Typed.O)
+                      rawClss
+        rhs      = filter (Test.QuickSpec.Utils.Typed.several
+                            ((== 1) . length))
+                          rawNatClasses
 
 -- Helpers
 
@@ -1212,13 +1170,20 @@ doPrune clss = pruned
 
 natClasses = map (Test.QuickSpec.Utils.Typed.several
                    (map Test.QuickSpec.Term.term))
-                 qsClss
-  where qsClss = concatMap (Test.QuickSpec.Utils.Typed.some2
-                             (map (Test.QuickSpec.Utils.Typed.Some .
-                                   Test.QuickSpec.Utils.Typed.O)   .
-                             Test.QuickSpec.TestTree.classes))
-                           (Test.QuickSpec.Utils.TypeMap.toList r)
-        r = unsafePerformIO $ Test.QuickSpec.Generate.generate
+                 rawNatClasses
+
+rawNatClasses = concatMap (Test.QuickSpec.Utils.Typed.some2
+                            (map (Test.QuickSpec.Utils.Typed.Some .
+                                  Test.QuickSpec.Utils.Typed.O)   .
+                            Test.QuickSpec.TestTree.classes))
+                          (Test.QuickSpec.Utils.TypeMap.toList r)
+  where r = unsafePerformIO $ Test.QuickSpec.Generate.generate
                                 False
                                 (const Test.QuickSpec.Term.partialGen)
                                 natSig
+
+tType (Test.QuickSpec.Term.Var   s) = Test.QuickSpec.Utils.Typeable.unTypeRep (Test.QuickSpec.Term.symbolType s)
+tType (Test.QuickSpec.Term.Const s) = Test.QuickSpec.Utils.Typeable.unTypeRep (Test.QuickSpec.Term.symbolType s)
+tType (Test.QuickSpec.Term.App l r) = case funResultTy (tType l) (tType r) of
+  Nothing -> error ("Incompatible types (" ++ show (tType l) ++ ") (" ++ show (tType r) ++ ")")
+  Just t  -> t

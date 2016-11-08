@@ -592,7 +592,23 @@ classesFromEqs eqs = trc ("classesFromEqs clss",  clss)  .
   where result = combine [] clss'
         clss   = foldl addToClasses [] eqs
         clss'  = map nub (foldl extend clss terms)
-        terms  = concatMap (\(Eq l r) -> [l, r]) eqs
+        terms  = concatMap (\(Eq l r) -> l : r : subTerms l ++ subTerms r) eqs
+
+        subTerms (C _)       = []
+        subTerms (V _)       = []
+        subTerms (App l r _) = let l' = if termArity l == Arity 0
+                                           then [l]
+                                           else []
+                                   r' = if termArity l == Arity 0
+                                           then [l]
+                                           else []
+                                   ls = if termArity l > Arity 0
+                                           then subTerms l
+                                           else []
+                                   rs = if termArity r > Arity 0
+                                           then subTerms r
+                                           else []
+                                in l' ++ r' ++ ls ++ rs
 
         extend []     t = [[t]]
         extend (c:cs) t = if t `elem` c
@@ -617,7 +633,7 @@ combine acc (c:cs) = case nub (overlaps c) of
 unSomeClasses :: [Equation] -> [WithSig [Test.QuickSpec.Term.Expr a]]
 unSomeClasses eqs = map mkUnSomeClass (classesFromEqs eqs)
 
-unSomeClassesN :: [Equation] -> Test.QuickSpec.Signature.Sig -> [[Test.QuickSpec.Term.Expr Term]]
+unSomeClassesN :: (Typeable a) => [Equation] -> Test.QuickSpec.Signature.Sig -> [[Test.QuickSpec.Term.Expr a]]
 unSomeClassesN eqs sig = trc ("unSomeClassesN classes",  classes)  .
                          trc ("unSomeClassesN unsorted", unsorted) .
                          trc ("unSomeClassesN result",   result)   $
@@ -625,6 +641,36 @@ unSomeClassesN eqs sig = trc ("unSomeClassesN classes",  classes)  .
   where classes  = classesFromEqs eqs
         unsorted = map (sort . mkUnSomeClassN sig) classes
         result   = sort unsorted
+
+unSomeClassesN2 :: [Equation]
+                -> Test.QuickSpec.Signature.Sig
+                -> [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
+unSomeClassesN2 eqs sig = collectExprs result
+  where classes  = classesFromEqs eqs
+        unsorted = map (mkUnSomeClassN2 sig) classes
+        result   = sortBy multi (map (sortBy single) unsorted)
+        single (Test.QuickSpec.Utils.Typed.Some x) (Test.QuickSpec.Utils.Typed.Some y) =
+          compare (Test.QuickSpec.Term.term x) (Test.QuickSpec.Term.term y)
+        multi (x:_) (y:_) = single x y
+
+collectExprs :: [[Test.QuickSpec.Utils.Typed.Some Test.QuickSpec.Term.Expr]]
+        -> [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
+collectExprs arg@[]   = []
+collectExprs (xs:xss) = collectOne xs : collectExprs xss
+  where collectOne :: [Test.QuickSpec.Utils.Typed.Some Test.QuickSpec.Term.Expr]
+                   -> Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr
+        collectOne xs = case xs of
+          []                                     -> Test.QuickSpec.Utils.Typed.Some
+                                                      (Test.QuickSpec.Utils.Typed.O
+                                                        ([] :: [Test.QuickSpec.Term.Expr ()]))
+          [Test.QuickSpec.Utils.Typed.Some x]    -> Test.QuickSpec.Utils.Typed.Some
+                                                      (Test.QuickSpec.Utils.Typed.O
+                                                        [x])
+          (Test.QuickSpec.Utils.Typed.Some x:xs) -> case collectOne xs of
+            Test.QuickSpec.Utils.Typed.Some
+              (Test.QuickSpec.Utils.Typed.O (y:xs')) -> case cast x `asTypeOf` Just y of
+                Just x' -> Test.QuickSpec.Utils.Typed.Some
+                             (Test.QuickSpec.Utils.Typed.O (x':y:xs'))
 
 mkUnSomeClass :: [Term] -> WithSig [Test.QuickSpec.Term.Expr a]
 mkUnSomeClass []     = WS nil'
@@ -635,8 +681,21 @@ mkUnSomeClassN :: Test.QuickSpec.Signature.Sig -> [Term] -> [Test.QuickSpec.Term
 mkUnSomeClassN sig []     = []
 mkUnSomeClassN sig (x:xs) = termToExprN x sig : mkUnSomeClassN sig xs
 
-
-
+mkUnSomeClassN2 :: Test.QuickSpec.Signature.Sig
+                -> [Term]
+                -> [Test.QuickSpec.Utils.Typed.Some Test.QuickSpec.Term.Expr]
+mkUnSomeClassN2 sig []     = []
+mkUnSomeClassN2 sig (x:xs) =
+    case termType (setForTerm x) of
+         Nothing -> error ("No type for " ++ show x)
+         Just t  -> case getVal (getRep t) of
+                         MkHT v -> (Test.QuickSpec.Utils.Typed.Some
+                                     (Test.QuickSpec.Term.Expr term
+                                                               arity
+                                                               (const v))) : xs'
+  where term        = renderTermN x sig
+        Arity arity = termArity x
+        xs' = mkUnSomeClassN2 sig xs
 
 unSomePrune :: [WithSig [Test.QuickSpec.Term.Expr a]] -> WithSig [Test.QuickSpec.Equation.Equation]
 unSomePrune clss = WS ((((prune' $$$ arg1) $$$ arg2) $$$ id') $$$ arg3)
@@ -661,13 +720,46 @@ unSomePruneN clss sig =
 
         eqs   = sort (mkEqs2N clss)
 
+mkCxt :: (Typeable a) => [[Test.QuickSpec.Term.Expr a]]
+                      -> Test.QuickSpec.Signature.Sig
+                      -> Test.QuickSpec.Reasoning.NaiveEquationalReasoning.Context
 mkCxt clss sig = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
                    (Test.QuickSpec.Signature.maxDepth sig)
                    (Test.QuickSpec.Signature.symbols  sig)
                    (mkUniv2N clss)
 
+mkCxt2 :: [[Test.QuickSpec.Utils.Typed.Some Test.QuickSpec.Term.Expr]]
+       -> Test.QuickSpec.Signature.Sig
+       -> Test.QuickSpec.Reasoning.NaiveEquationalReasoning.Context
+mkCxt2 clss sig = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
+                   (Test.QuickSpec.Signature.maxDepth sig)
+                   (Test.QuickSpec.Signature.symbols  sig)
+                   (mkUniv3 clss)
+
+mkCxt3 :: [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
+       -> Test.QuickSpec.Signature.Sig
+       -> Test.QuickSpec.Reasoning.NaiveEquationalReasoning.Context
+mkCxt3 clss sig = Test.QuickSpec.Reasoning.NaiveEquationalReasoning.initial
+                   (Test.QuickSpec.Signature.maxDepth sig)
+                   (Test.QuickSpec.Signature.symbols  sig)
+                   (mkUniv4 clss)
+  where mkUniv4 :: [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
+                -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
+        mkUniv4 = concatMap (Test.QuickSpec.Utils.Typed.several
+                              (map (Test.QuickSpec.Utils.Typed.tagged
+                                     Test.QuickSpec.Term.term)))
+
+
 classesToReps clss = filter (not . Test.QuickSpec.Term.isUndefined)
                             (map (term . head) clss)
+
+classesToReps2 :: [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
+               -> [Test.QuickSpec.Term.Term]
+classesToReps2 clss = filter (not . Test.QuickSpec.Term.isUndefined) reps
+  where reps = map (Test.QuickSpec.Utils.Typed.several getRep) clss
+        getRep :: [{-Test.QuickSpec.Utils.Typed.Some-} Test.QuickSpec.Term.Expr a]
+               -> Test.QuickSpec.Term.Term
+        getRep ({-Test.QuickSpec.Utils.Typed.Some-} x:_) = term x
 
 unSomePruneEqs :: [[Test.QuickSpec.Term.Expr Term]]
                -> Test.QuickSpec.Signature.Sig
@@ -704,6 +796,11 @@ univ2N y = Test.QuickSpec.Utils.Typed.Tagged
                (Test.QuickSpec.Utils.Typed.Witness (stripN y)))
              (term y)
 
+mkUniv3 :: [[Test.QuickSpec.Utils.Typed.Some Test.QuickSpec.Term.Expr]]
+        -> [Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term]
+mkUniv3 = concatMap (map (Test.QuickSpec.Utils.Typed.some
+                           (Test.QuickSpec.Utils.Typed.tagged
+                             Test.QuickSpec.Term.term)))
 
 conWitness' :: TypedExpr (a -> Test.QuickSpec.Utils.Typed.Witnessed a)
 conWitness' = TE $ qualified "Test.QuickSpec.Utils.Typed" "Witness"
@@ -752,8 +849,6 @@ mkEqs2N cs = sort (concatMap f cs)
   where f (z:zs) = [term y Test.QuickSpec.Equation.:=: term z | y <- zs]
 
 
-
-
 sort' :: Ord a => TypedExpr ([a] -> [a])
 sort' = TE $ qualified "Data.List" "sort"
 
@@ -770,7 +865,9 @@ termToExpr t = WS (((expr' $$$ term) $$$ arity) $$$ eval)
         expr' :: TypedExpr (_ -> Int -> _ -> Test.QuickSpec.Term.Expr _)
         expr' = TE (qualified "Test.QuickSpec.Term" "Expr")
 
-termToExprN :: Term -> Test.QuickSpec.Signature.Sig -> (Test.QuickSpec.Term.Expr a)
+termToExprN :: Term
+            -> Test.QuickSpec.Signature.Sig
+            -> (Test.QuickSpec.Term.Expr a)
 termToExprN t sig = Test.QuickSpec.Term.Expr term arity eval
   where term        = renderTermN t sig
         Arity arity = termArity t
