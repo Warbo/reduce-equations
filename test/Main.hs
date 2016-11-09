@@ -430,10 +430,10 @@ natEqsMatchQS = once $ monadicIO $ do
       foundEqs = parseAndReduce rawNatEqs
       fLen = length foundEqs
       eLen = length expectEqs
-  monitor . counterexample $ show (trc (show (("foundEqs",  foundEqs),
-                                              ("expectEqs", expectEqs)))
-                                       (("length foundEqs",  length foundEqs),
-                                        ("length expectEqs", length expectEqs)))
+  monitor . counterexample $ show (("foundEqs",  foundEqs),
+                                   ("expectEqs", expectEqs),
+                                   ("length foundEqs",  length foundEqs),
+                                   ("length expectEqs", length expectEqs))
   assert (length foundEqs == length expectEqs)
 
 extractedTypesUnique (Eqs eqs) = counterexample (show types)

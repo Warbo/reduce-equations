@@ -20,7 +20,6 @@ import qualified Data.Map
 import qualified Data.Ord
 import Data.String
 import Data.Typeable
-import Debug.Trace (traceShow)
 import qualified Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
 import Math.Equation.Internal.Types
@@ -209,11 +208,8 @@ isIn syms n = any f syms
   where f = (n ==) . Test.QuickSpec.Term.name
 
 classesFromEqs :: [Equation] -> [[Term]]
-classesFromEqs eqs = trc ("classesFromEqs clss",  clss)  .
-                     trc ("classesFromEqs clss'", clss') $
-                     result
-  where result = combine [] clss'
-        clss   = foldl addToClasses [] eqs
+classesFromEqs eqs = combine [] clss'
+  where clss   = foldl addToClasses [] eqs
         clss'  = map nub (foldl extend clss terms)
         terms  = concatMap (\(Eq l r) -> l : r : subTerms l ++ subTerms r) eqs
 
@@ -424,48 +420,12 @@ pruneEqsN eqs = result
         result  = showEqsOnLinesN pruned
         classes = unSomeClassesN2 eqs sig
 
-dumpSym s = (("index"       :: String, Test.QuickSpec.Term.index       s),
-             ("name"        :: String, Test.QuickSpec.Term.name        s),
-             ("symbolArity" :: String, Test.QuickSpec.Term.symbolArity s),
-             ("silent"      :: String, Test.QuickSpec.Term.silent      s),
-             ("undef"       :: String, Test.QuickSpec.Term.undef       s),
-             ("symbolType"  :: String, Test.QuickSpec.Term.symbolType  s))
-
-putErr = hPutStrLn stderr
-
-debug = case unsafePerformIO (lookupEnv "DEBUG") of
-  Nothing -> False
-  Just "" -> False
-  _       -> True
-
-trc :: Show a => a -> b -> b
-trc = if debug
-         then traceShow
-         else \x y -> y
-
 instance Show (Test.QuickSpec.Utils.Typed.Tagged Test.QuickSpec.Term.Term) where
   show t = show ("Tagged"      :: String,
                   ("tag"       :: String,
                     ("type"    :: String, Test.QuickSpec.Utils.Typed.witnessType
                                             (Test.QuickSpec.Utils.Typed.tag t))),
                   ("erase"     :: String, Test.QuickSpec.Utils.Typed.erase t))
-
--- From Test.QuickSpec.Main
-provable reps (t Test.QuickSpec.Equation.:=: u) = do
-  res <- t Test.QuickSpec.Reasoning.NaiveEquationalReasoning.=?= u
-  if res
-     then return True
-     else do
-       state <- Test.QuickSpec.Reasoning.NaiveEquationalReasoning.get
-       -- Check that we won't unify two representatives---if we do
-       -- the equation is false
-       t Test.QuickSpec.Reasoning.NaiveEquationalReasoning.=:= u
-       reps' <- mapM Test.QuickSpec.Reasoning.NaiveEquationalReasoning.rep reps
-       if sort reps' == Test.QuickSpec.Utils.usort reps'
-          then return False
-          else do
-            Test.QuickSpec.Reasoning.NaiveEquationalReasoning.put state
-            return True
 
 doPrune clss sig = pruned
   where univ = concatMap (Test.QuickSpec.Utils.Typed.some2
