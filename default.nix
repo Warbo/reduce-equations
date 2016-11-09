@@ -1,5 +1,5 @@
 { mkDerivation, aeson, base, bytestring, containers, directory
-, haskell-src-exts, mlspec-helper, mtl, nix-eval, QuickCheck
+, haskell-src-exts, MissingH, mlspec-helper, mtl, QuickCheck
 , quickspec, stdenv, stringable, tasty, tasty-quickcheck, text
 , transformers
 }:
@@ -10,13 +10,14 @@ mkDerivation {
   isLibrary = true;
   isExecutable = true;
   libraryHaskellDepends = [
-    aeson base bytestring haskell-src-exts mlspec-helper mtl nix-eval
+    aeson base bytestring containers haskell-src-exts mlspec-helper mtl
     QuickCheck quickspec stringable text transformers
   ];
   executableHaskellDepends = [ aeson base ];
   testHaskellDepends = [
     aeson base bytestring containers directory haskell-src-exts
-    nix-eval QuickCheck quickspec stringable tasty tasty-quickcheck
+    MissingH QuickCheck quickspec stringable tasty tasty-quickcheck
+    text
   ];
   homepage = "http://chriswarbo.net/git/reduce-equations";
   description = "Simplify a set of equations by removing redundancies";

@@ -14,26 +14,22 @@ import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Math.Equation.Internal.Eval
 import           Math.Equation.Internal.Types
 
-doReduceN = parseAndReduceN <$> BS.getContents >>= showEqs
+doReduce = parseAndReduce <$> BS.getContents >>= showEqs
 
 showEqs = mapM_ (BS.putStrLn . encode)
 
-parseAndReduceN s = case eitherDecode s of
+parseAndReduce s = case eitherDecode s of
   Left  err -> error ("Failed to parse eqs: " ++ err)
-  Right eqs -> reductionN eqs
+  Right eqs -> reduction eqs
 
-reductionN :: [Equation] -> [Equation]
-reductionN eqs = if consistent eqs'
+reduction :: [Equation] -> [Equation]
+reduction eqs = if consistent eqs'
                     then result
                     else error "Inconsistent types in parsed equations"
   where eqs'        = setAllTypes eqs
         (db, eqs'') = replaceTypes eqs'
         o           = pruneEqsN eqs''
-        result      = trc ("db",    db)    .
-                      trc ("eqs'",  eqs')  .
-                      trc ("eqs''", eqs'') .
-                      trc ("o",     o)     $
-                      restoreTypes db o
+        result      = restoreTypes db o
 
 replaceTypes :: [Equation] -> ([(Type, Type)], [Equation])
 replaceTypes eqs = let db = zip typs new

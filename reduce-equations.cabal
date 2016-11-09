@@ -31,7 +31,6 @@ library
                      , quickspec
                      , transformers
                      , mtl
-                     , nix-eval >= 0.3.2.10
                      , mlspec-helper
                      , haskell-src-exts >= 1.18.2
                      , stringable
@@ -62,7 +61,6 @@ test-suite test
                      , bytestring
                      , haskell-src-exts >= 1.18.2
                      , MissingH
-                     , nix-eval
                      , stringable
                      , containers
                      , QuickCheck == 2.8.2

@@ -10,7 +10,6 @@ import           Data.Ord (comparing)
 import           Data.Stringable hiding (length)
 import qualified Data.Text.Lazy          as T
 import qualified Data.Text.Lazy.Encoding as TE
-import           Language.Eval
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
 import qualified Language.Haskell.Exts.Pretty as HSE.Pretty
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
@@ -275,10 +274,6 @@ setForTerm (App l r Nothing)  =
    in case termType' l' of
            HSE.Syntax.TyFun _ _ o -> App l' r' (Just o)
            x                      -> error ("Expected function type, got " ++ show x)
-
-asList' :: [Expr] -> Expr
-asList' []     = "[]"
-asList' (e:es) = ("(:)" $$ e) $$ asList' es
 
 termType' :: Term -> Type
 termType' t = let Just x = termType t in x

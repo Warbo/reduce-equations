@@ -14,7 +14,6 @@ import qualified Data.String                  as DS
 import           Data.String.Utils
 import           Data.Text.Encoding
 import           Data.Typeable
-import           Language.Eval.Internal
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Math.Equation.Internal
@@ -68,7 +67,6 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Sig has equation variables"      eqSigHasVars
   , testProperty "Sig has equation constants"      eqSigHasConsts
   , testProperty "Equations have one arity"        equationsHaveSameArity
-  , testProperty "Can render equations"            canRenderEqs
   , testProperty "Can get type of terms"           canGetTermType
   , testProperty "No trivial terms"                noTrivialTerms
   , testProperty "Equations are consistent"        eqsAreConsistent
@@ -354,28 +352,13 @@ eqSigHasConsts eqs = counterexample debug test
                           ("sigconsts", sigconsts),
                           ("eqconsts",  eqconsts))
 
-canRenderEqs = doOnce canRenderEqs'
-
-canRenderEqs' (Eqs eqs) = run
-  where run          = testEval mkExpr haveEqs
-        mkExpr ()    = (indent expr, debug)
-        expr         = renderWithSig (WS (unlines' $$$ shownEqs')) sig
-        sig          = sigFromEqs eqs
-        WS shownEqs' = WS ((map' $$$ (showEquation' $$$ "givenSig")) $$$ eqs')
-        WS eqs'      = renderEqs eqs
-        debug        = (("eqs",  eqs),
-                        ("sig",  sig),
-                        ("eqs'", eqs'))
-        haveEqs Nothing  = error "Failed to eval"
-        haveEqs (Just s) = length (filter ("==" `isInfixOf`) (lines s)) == length eqs
-
 canPruneEqs = once (forAll (resize 20 arbitrary) canPruneEqs')
 canPruneEqs' (Eqs eqs) = counterexample (show (("eqs", eqs), ("eqs'", eqs')))
                                         (expected eqs')
   where expected []     =      null eqs -- No output when no eqs
         expected (x:xs) = not (null eqs)
 
-        eqs' = reductionN eqs
+        eqs' = reduction eqs
 
 canGetTermType input output = expected (termType' term)
   where term  = app (C (Const undefined undefined func))
@@ -396,14 +379,14 @@ switchFunctionTypes i1 i2 o1 o2 = check <$> termOfType (HSE.Syntax.TyFun () i1 o
 
 regressionTypeParse = LB.length (encode result) > 0
   where ex = "[{\"relation\":\"~=\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"List Integer -> List Integer\",\"symbol\":\"reverse\"},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}},\"rhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"application\",\"lhs\":{\"role\":\"constant\",\"type\":\"Integer -> List Integer -> List Integer\",\"symbol\":\"cCons\"},\"rhs\":{\"role\":\"variable\",\"type\":\"Integer\",\"id\":3}},\"rhs\":{\"role\":\"constant\",\"type\":\"List Integer\",\"symbol\":\"cNil\"}}}]"
-        result = parseAndReduceN ex
+        result = parseAndReduce ex
 
 natHasEqs = case eitherDecode rawNatEqs :: Either String [Equation] of
                  Left err  -> error err
                  Right []  -> error "No equations found"
                  Right eqs -> True
 
-natKeepsEqs = case parseAndReduceN rawNatEqs of
+natKeepsEqs = case parseAndReduce rawNatEqs of
                    [] -> error "No equations found"
                    _  -> True
 
@@ -444,7 +427,7 @@ natEqsPruned = length pruned < length rawEqs'
 natEqsMatchQS = once $ monadicIO $ do
   expect <- run $ LB.readFile "test/data/nat-simple-expect.json"
   let Right expectEqs = eitherDecode expect :: Either String [Equation]
-      foundEqs = parseAndReduceN rawNatEqs
+      foundEqs = parseAndReduce rawNatEqs
       fLen = length foundEqs
       eLen = length expectEqs
   monitor . counterexample $ show (trc (show (("foundEqs",  foundEqs),
@@ -518,12 +501,12 @@ newReduce = once (forAll (resize 20 arbitrary) newReduce')
 newReduce' (Eqs eqs) = counterexample (show (("eqs",    eqs),
                                              ("result", result)))
                                       (length (show result) > 0)
-  where result = reductionN eqs
+  where result = reduction eqs
 
 reduceIdem = once (forAll (resize 20 arbitrary) reduceIdem')
 reduceIdem' (Eqs eqs) = setEq eqs' eqs''
-  where eqs'  = reductionN eqs
-        eqs'' = reductionN eqs'
+  where eqs'  = reduction eqs
+        eqs'' = reduction eqs'
 
 transStripped = once . resize 10 $ do
     Eqs eqs <- arbitrary
@@ -536,7 +519,7 @@ transStripped = once . resize 10 $ do
     -- Add a bunch of redundant equations
     eqs'    <- renameEqs (eqs ++ [Eq x y | x <- b:c:ds, y <- b:c:ds])
     let (_, eqs'') = replaceTypes eqs'
-        pruned     = reductionN eqs''
+        pruned     = reduction eqs''
 
     -- Check if (at least) our redundant equations got stripped out
     return (length pruned <= length eqs + 2 + length ds)
@@ -643,16 +626,6 @@ manualNatReducesSelf = counterexample (show ("pruned", pruned))
 
 -- Helpers
 
-pruneWithSingletons = doPrune clss natSig
-  where clss    = lhs ++ rhs
-        rawClss = unSomeClassesN parsedNatEqs natSig  :: [[Test.QuickSpec.Term.Expr Natural]]
-        lhs     = map (Test.QuickSpec.Utils.Typed.Some .
-                         Test.QuickSpec.Utils.Typed.O)
-                      rawClss
-        rhs      = filter (Test.QuickSpec.Utils.Typed.several
-                            ((== 1) . length))
-                          rawNatClasses
-
 natSig = mconcat [
   Test.QuickSpec.Signature.fun0 "cZ"    (0    :: Natural),
   Test.QuickSpec.Signature.fun1 "cS"    ((+1) :: Natural -> Natural),
@@ -713,55 +686,6 @@ setDiffBy :: (a -> b -> Bool)
 setDiffBy f xs ys = (xs', ys')
   where xs' = filter (\x -> not (any (x `f`) ys)) xs
         ys' = filter (\y -> not (any (`f` y) xs)) ys
-
-endsInTrue x = case x of
-  Nothing -> False
-  Just y  -> last (lines y) == "True"
-
-putTrue :: TypedExpr (IO ())
-putTrue  = TE $ "putStr" $$ asString "True"
-
--- | Check that the generated `String` expressions satisfy the given predicate.
---   The type `b` is for any extra debug output to include in case of failure.
-testEval :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr String, b))
-                                          -> (Maybe String -> Bool)
-                                          -> Property
-testEval = testEval' (\(TE e) -> eval e)
-
--- | Check that the output of the generated `IO` actions satifies the given
---   predicate. `b` is for extra debug output to include in case of failure.
-testExec :: (Arbitrary a, Show a, Show b) => (a -> (TypedExpr (IO e), b))
-                                           -> (Maybe String -> Bool)
-                                           -> Property
-testExec = testEval' exec
-
--- | Takes an expression-evaluating function, an expression-generating function
---   (`b` is any debug output we should include in case of failure), an
---   output-checking function and tests whether the output of evaluating the
---   generated expressions passes the checker.
-testEval' :: (Arbitrary a, Show a, Show b) => (TypedExpr e -> IO (Maybe String))
-                                           -> (a -> (TypedExpr e, b))
-                                           -> (Maybe String -> Bool)
-                                           -> Property
-testEval' evl mkExpr expect = once $ monadicIO $ do
-  arg <- run (generate arbitrary)
-  monitor . counterexample . show $ ("arg", arg)
-  let (e, dbg) = mkExpr arg
-  result <- run (evl (indent e))
-  monitor . counterexample . show $ (("expr",   e),
-                                     ("result", result),
-                                     ("debug",  dbg))
-  assert (expect result)
-
-indent (TE e) = TE (withPkgs ["hindent"] e)
-
-constantSymbols' :: TypedExpr (QSSig -> [Test.QuickSpec.Term.Symbol])
-constantSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
-                                           "constantSymbols"
-
-variableSymbols' :: TypedExpr (QSSig -> [Test.QuickSpec.Term.Symbol])
-variableSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
-                                           "variableSymbols"
 
 -- Data generators
 
