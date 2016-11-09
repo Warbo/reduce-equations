@@ -1,2 +1,92 @@
-{"relation":"~=","lhs":{"role":"application","lhs":{"role":"application","lhs":{"role":"constant","type":"Nat -> Nat -> Bool","symbol":"le"},"rhs":{"role":"variable","type":"Nat","id":1}},"rhs":{"role":"variable","type":"Nat","id":1}},"rhs":{"role":"application","lhs":{"role":"application","lhs":{"role":"constant","type":"Nat -> Nat -> Bool","symbol":"le"},"rhs":{"role":"variable","type":"Nat","id":0}},"rhs":{"role":"variable","type":"Nat","id":0}}}
-{"relation":"~=","lhs":{"role":"application","lhs":{"role":"application","lhs":{"role":"constant","type":"Nat -> Nat -> Bool","symbol":"le"},"rhs":{"role":"variable","type":"Nat","id":2}},"rhs":{"role":"variable","type":"Nat","id":2}},"rhs":{"role":"application","lhs":{"role":"application","lhs":{"role":"constant","type":"Nat -> Nat -> Bool","symbol":"le"},"rhs":{"role":"variable","type":"Nat","id":0}},"rhs":{"role":"variable","type":"Nat","id":0}}}
+[
+  {
+    "relation": "~=",
+    "lhs": {
+      "role": "application",
+      "lhs": {
+        "role": "application",
+        "lhs": {
+          "role": "constant",
+          "type": "Nat -> Nat -> Bool",
+          "symbol": "le"
+        },
+        "rhs": {
+          "role": "variable",
+          "type": "Nat",
+          "id": 1
+        }
+      },
+      "rhs": {
+        "role": "variable",
+        "type": "Nat",
+        "id": 1
+      }
+    },
+    "rhs": {
+      "role": "application",
+      "lhs": {
+        "role": "application",
+        "lhs": {
+          "role": "constant",
+          "type": "Nat -> Nat -> Bool",
+          "symbol": "le"
+        },
+        "rhs": {
+          "role": "variable",
+          "type": "Nat",
+          "id": 0
+        }
+      },
+      "rhs": {
+        "role": "variable",
+        "type": "Nat",
+        "id": 0
+      }
+    }
+  },
+  {
+    "relation": "~=",
+    "lhs": {
+      "role": "application",
+      "lhs": {
+        "role": "application",
+        "lhs": {
+          "role": "constant",
+          "type": "Nat -> Nat -> Bool",
+          "symbol": "le"
+        },
+        "rhs": {
+          "role": "variable",
+          "type": "Nat",
+          "id": 2
+        }
+      },
+      "rhs": {
+        "role": "variable",
+        "type": "Nat",
+        "id": 2
+      }
+    },
+    "rhs": {
+      "role": "application",
+      "lhs": {
+        "role": "application",
+        "lhs": {
+          "role": "constant",
+          "type": "Nat -> Nat -> Bool",
+          "symbol": "le"
+        },
+        "rhs": {
+          "role": "variable",
+          "type": "Nat",
+          "id": 0
+        }
+      },
+      "rhs": {
+        "role": "variable",
+        "type": "Nat",
+        "id": 0
+      }
+    }
+  }
+]

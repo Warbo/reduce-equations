@@ -1,7 +1,92 @@
-# Not strictly JSON, but QuickSpec forces our hand. Filter out lines which don't
-# begin with '{' and you should be fine.
-Depth 1: 9 terms, 3 tests, 17 evaluations, 9 classes, 0 raw equations.
-Depth 2: 27 terms, 500 tests, 1584 evaluations, 25 classes, 2 raw equations.
-Depth 3: 27 terms, 500 tests, 1670 evaluations, 25 classes, 2 raw equations.
-{"relation":"~=","lhs":{"role":"application","lhs":{"role":"application","lhs":{"role":"constant","type":"[Integer] -> [Integer] -> Ordering","symbol":"lengthCompare"},"rhs":{"role":"variable","type":"[Integer]","id":7}},"rhs":{"role":"variable","type":"[Integer]","id":7}},"rhs":{"role":"application","lhs":{"role":"application","lhs":{"role":"constant","type":"[Integer] -> [Integer] -> Ordering","symbol":"lengthCompare"},"rhs":{"role":"variable","type":"[Integer]","id":6}},"rhs":{"role":"variable","type":"[Integer]","id":6}}}
-{"relation":"~=","lhs":{"role":"application","lhs":{"role":"application","lhs":{"role":"constant","type":"[Integer] -> [Integer] -> Ordering","symbol":"lengthCompare"},"rhs":{"role":"variable","type":"[Integer]","id":8}},"rhs":{"role":"variable","type":"[Integer]","id":8}},"rhs":{"role":"application","lhs":{"role":"application","lhs":{"role":"constant","type":"[Integer] -> [Integer] -> Ordering","symbol":"lengthCompare"},"rhs":{"role":"variable","type":"[Integer]","id":6}},"rhs":{"role":"variable","type":"[Integer]","id":6}}}
+[
+  {
+    "relation": "~=",
+    "lhs": {
+      "role": "application",
+      "lhs": {
+        "role": "application",
+        "lhs": {
+          "role": "constant",
+          "type": "[Integer] -> [Integer] -> Ordering",
+          "symbol": "lengthCompare"
+        },
+        "rhs": {
+          "role": "variable",
+          "type": "[Integer]",
+          "id": 7
+        }
+      },
+      "rhs": {
+        "role": "variable",
+        "type": "[Integer]",
+        "id": 7
+      }
+    },
+    "rhs": {
+      "role": "application",
+      "lhs": {
+        "role": "application",
+        "lhs": {
+          "role": "constant",
+          "type": "[Integer] -> [Integer] -> Ordering",
+          "symbol": "lengthCompare"
+        },
+        "rhs": {
+          "role": "variable",
+          "type": "[Integer]",
+          "id": 6
+        }
+      },
+      "rhs": {
+        "role": "variable",
+        "type": "[Integer]",
+        "id": 6
+      }
+    }
+  },
+  {
+    "relation": "~=",
+    "lhs": {
+      "role": "application",
+      "lhs": {
+        "role": "application",
+        "lhs": {
+          "role": "constant",
+          "type": "[Integer] -> [Integer] -> Ordering",
+          "symbol": "lengthCompare"
+        },
+        "rhs": {
+          "role": "variable",
+          "type": "[Integer]",
+          "id": 8
+        }
+      },
+      "rhs": {
+        "role": "variable",
+        "type": "[Integer]",
+        "id": 8
+      }
+    },
+    "rhs": {
+      "role": "application",
+      "lhs": {
+        "role": "application",
+        "lhs": {
+          "role": "constant",
+          "type": "[Integer] -> [Integer] -> Ordering",
+          "symbol": "lengthCompare"
+        },
+        "rhs": {
+          "role": "variable",
+          "type": "[Integer]",
+          "id": 6
+        }
+      },
+      "rhs": {
+        "role": "variable",
+        "type": "[Integer]",
+        "id": 6
+      }
+    }
+  }
+]
