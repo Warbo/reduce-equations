@@ -190,12 +190,8 @@ sigsHaveVars' eqs =
       checkVars  = checkNames names
       names      = map varName vs
       foundNames = map Test.QuickSpec.Term.name variables
-      dbg        = show (--("eqs",   eqs),
-                         --("s",     s),
-                         ("expect names", names),
-                         ("found names", foundNames)
-                         --("vs",    vs)
-                        )
+      dbg        = show (("expect names", names),
+                         ("found names", foundNames))
   in counterexample dbg (return hasVars :: Gen Bool)
 
 sigConstsUniqueIndices = once . resize 20 $ do
@@ -567,8 +563,7 @@ manualNatAllowsGiven = counterexample (show eqs')
         eqs'   = unSomePruneN clss' natSig
 
         naturalEqs = map (replaceEqTypes db) parsedNatEqs
-        db         = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Nat")),
-                       HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")))]
+        db         = [(tyCon "Nat", tyCon "Natural")]
 
 manualNatClassesMatch = counterexample dbg result
   where ourClss   = classesFromEqs eqs'
@@ -576,8 +571,7 @@ manualNatClassesMatch = counterexample dbg result
         ourClss'' = map (map Test.QuickSpec.Term.term) ourClss'
 
         eqs' = map (replaceEqTypes db) parsedNatEqs
-        db   = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Nat")),
-                 HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")))]
+        db   = [(tyCon "Nat", tyCon "Natural")]
 
         result = setEq natNonTrivial ourClss''
 
@@ -598,8 +592,7 @@ topNatTermsFound = all termInClasses (termsOf [] eqs')
                                 _              -> True
         clss = classesFromEqs eqs'
         eqs' = map (replaceEqTypes db) parsedNatEqs
-        db   = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Nat")),
-                 HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")))]
+        db   = [(tyCon "Nat", tyCon "Natural")]
 
 qsNatTermsFound = case unfoundInOurs of
     [] -> True
@@ -612,8 +605,7 @@ qsNatTermsFound = case unfoundInOurs of
 
         unfoundInOurs = filter (not . inOurs) allTerms
 
-        db   = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Nat")),
-                 HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")))]
+        db   = [(tyCon "Nat", tyCon "Natural")]
         eqs' = map (replaceEqTypes db) parsedNatEqs
 
 natClassesIncludeSingletons = any ((== 1) . length) natClasses
@@ -630,10 +622,7 @@ exactClassMatch = counterexample (show (("ourClasses", ourClasses),
 convertPrunes = length (doPrune qsClasses natSig') == 10
   where qsClasses  = filter (Test.QuickSpec.Utils.Typed.several ((> 1) . length))
                             rawNatClasses'
-        --qsClasses' = replaceQSTypes db qsClasses
-        --qsClasses' = unSomeSortedQSClasses qsClasses
-        db         = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")),
-                       HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Z")))]
+        db         = [(tyCon "Natural", tyCon "Z")]
 
 -- We don't compare equations directly, since they may differ slightly e.g. due
 -- to commutativity
@@ -779,11 +768,11 @@ variableSymbols' = TE . withQS . qualified "Test.QuickSpec.Signature" $
 -- Example input from files
 
 exampleEqs :: [[Equation]]
-exampleEqs = map (parseLines . S.fromString) exampleJson
+exampleEqs = map (fromJust . decode) exampleJson
 
-exampleJson :: [String]
+exampleJson :: [LB.ByteString]
 {-# NOINLINE exampleJson #-}
-exampleJson = unsafePerformIO $ exampleFiles >>= mapM readFile
+exampleJson = unsafePerformIO $ exampleFiles >>= mapM LB.readFile
 
 exampleDir = "test/data"
 
@@ -1155,7 +1144,7 @@ swapTypes' db = map (Test.QuickSpec.Utils.Typed.several
                                                            Test.QuickSpec.Term.eval = \env -> case trm of
                                                                Test.QuickSpec.Term.Var   s -> Test.QuickSpec.Term.unValuation env (Test.QuickSpec.Term.Variable (Test.QuickSpec.Term.Atom s (Test.QuickSpec.Term.pgen (return x))))
                                                                Test.QuickSpec.Term.Const s -> x
-                                                               Test.QuickSpec.Term.App l r -> x --(Test.QuickSpec.Term.eval e) env
+                                                               Test.QuickSpec.Term.App l r -> x
                                                          })
                                                        xs))))
 
@@ -1217,5 +1206,4 @@ replaceQSType db t =
                                e])
         prnt = replaceInType db . prs
 
-naturalDb = [(HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Natural")),
-             HSE.Syntax.TyCon () (HSE.Syntax.UnQual () (HSE.Syntax.Ident () "Z")))]
+naturalDb = [(tyCon "Natural", tyCon "Z")]

@@ -14,25 +14,13 @@ import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Math.Equation.Internal.Eval
 import           Math.Equation.Internal.Types
 
-doReduce = BS.getContents >>= parseAndReduce >>= showEqs
-
 doReduceN = parseAndReduceN <$> BS.getContents >>= showEqs
 
 showEqs = mapM_ (BS.putStrLn . encode)
 
-parseAndReduce :: BS.ByteString -> IO [Equation]
-parseAndReduce s = reduction (parseLines s)
-
 parseAndReduceN s = case eitherDecode s of
   Left  err -> error ("Failed to parse eqs: " ++ err)
   Right eqs -> reductionN eqs
-
-reduction eqs = do
-  let (db, eqs') = replaceTypes eqs
-  result <- pruneEqs eqs'
-  case result of
-       Nothing -> error "Failed to reduce given input"
-       Just o  -> return (replaceVars db (S.fromString o))
 
 reductionN :: [Equation] -> [Equation]
 reductionN eqs = if consistent eqs'
@@ -46,18 +34,6 @@ reductionN eqs = if consistent eqs'
                       trc ("eqs''", eqs'') .
                       trc ("o",     o)     $
                       restoreTypes db o
-
-parseLines :: BS.ByteString -> [Equation]
-parseLines s = map (setForEq . parse) eqLines
-  where eqLines :: [BS.ByteString]
-        eqLines = filter (BS.isPrefixOf "{") (bsLines s)
-        bsLines = BS.split '\n' --(BI.c2w '\n')
-
-
-parse :: BS.ByteString -> Equation
-parse l = case eitherDecode l of
-  Left err -> error ("Couldn't parse line: " ++ S.toString l ++ ", " ++ err)
-  Right eq -> eq
 
 replaceTypes :: [Equation] -> ([(Type, Type)], [Equation])
 replaceTypes eqs = let db = zip typs new
@@ -94,8 +70,6 @@ allTypes = nub . filter notFunc
 
         components (HSE.Syntax.TyFun _ i o) = components i ++ components o
         components t                        = [t]
-
-replaceVars db = restoreTypes db . parseLines
 
 restoreTypes :: [(Type, Type)] -> [Equation] -> [Equation]
 restoreTypes db = map (replaceEqTypes db')
