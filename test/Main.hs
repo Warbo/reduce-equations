@@ -176,7 +176,7 @@ sigsHaveConsts = once $ do
       names         = map constName cs
   return (checkNames names consts)
 
-sigsHaveVars = once (forAllShrink (resize 42 genNormalisedEqs) sigsHaveVars')
+sigsHaveVars = once (forAll (resize 42 genNormalisedEqs) sigsHaveVars')
 sigsHaveVars' eqs =
   let s@(Sig _ vs) = sigFromEqs eqs
 
@@ -271,7 +271,7 @@ classHasSameArity eqs = all oneArity classes
 equationsHaveSameArity (Eqs eqs) = all sameArity eqs
   where sameArity (Eq l r) = termArity l == termArity r
 
-nonEqualElementsSeparate ty = forAllShrink (iterable ty) nonEqualElementsSeparate'
+nonEqualElementsSeparate ty = forAll (iterable ty) nonEqualElementsSeparate'
 
 nonEqualElementsSeparate' (t, v) = all found expected
   where (a:b:c:d:e:f:_) = map extend [0..]
@@ -289,7 +289,7 @@ nonEqualElementsSeparate' (t, v) = all found expected
 
         match xs ys = all (\x -> any (setEq x) ys) xs
 
-classElementsAreEqual = once (forAllShrink (resize 42 arbitrary) classElementsAreEqual')
+classElementsAreEqual = once (forAll (resize 42 arbitrary) classElementsAreEqual')
 classElementsAreEqual' (Eqs eqs) = all elementsAreEqual classes
   where classes :: [[Term]]
         classes              = classesFromEqs eqs
@@ -314,7 +314,7 @@ classesNotSingletons (Eqs eqs) = all nonSingle classes'
         getTerms acc []          = acc
         getTerms acc (Eq l r:es) = getTerms (l:r:acc) es
 
-canFindClosure ty = forAllShrink (iterable ty) canFindClosure'
+canFindClosure ty = forAll (iterable ty) canFindClosure'
 
 canFindClosure' (t, v) = all match expected
   where -- Generate unique terms by wrapping in "app c"
@@ -373,7 +373,7 @@ canRenderEqs' (Eqs eqs) = run
         haveEqs Nothing  = error "Failed to eval"
         haveEqs (Just s) = length (filter ("==" `isInfixOf`) (lines s)) == length eqs
 
-canPruneEqs = once (forAllShrink (resize 20 arbitrary) canPruneEqs')
+canPruneEqs = once (forAll (resize 20 arbitrary) canPruneEqs')
 canPruneEqs' (Eqs eqs) = counterexample (show (("eqs", eqs), ("eqs'", eqs')))
                                         (expected eqs')
   where expected []     =      null eqs -- No output when no eqs
@@ -388,7 +388,7 @@ canGetTermType input output = expected (termType' term)
         strip = filter (/= ' ')
         expected t = strip (typeName t) === strip (typeName output)
 
-noTrivialTerms t = forAllShrink (termOfType t) (not . trivial)
+noTrivialTerms t = forAll (termOfType t) (not . trivial)
 
 eqsAreConsistent (Eqs eqs) = consistentEqs eqs
 
@@ -462,7 +462,7 @@ extractedTypesUnique (Eqs eqs) = counterexample (show types)
   where types = allTypes eqs
 
 convertTypesIso =
-  (forAllShrink (resize 20 arbitrary)
+  (forAll (resize 20 arbitrary)
                (\x -> case convertTypesIso' x of
                            ([],        [])        -> property True
                            (extraEqs', extraConv) ->
@@ -518,41 +518,34 @@ justPrune = once $ do
         o = pruneEqsN eqs'
     return (length o >= 0)
 
-newReduce = once (forAllShrink (resize 20 arbitrary) newReduce')
-newReduce' eqs = counterexample (show (("eqs",    eqs),
-                                       ("result", result)))
-                                (length (show result) > 0)
+newReduce = once (forAll (resize 20 arbitrary) newReduce')
+newReduce' (Eqs eqs) = counterexample (show (("eqs",    eqs),
+                                             ("result", result)))
+                                      (length (show result) > 0)
   where result = reductionN eqs
 
-reduceIdem = once (forAllShrink (resize 20 arbitrary) reduceIdem')
+reduceIdem = once (forAll (resize 20 arbitrary) reduceIdem')
 reduceIdem' (Eqs eqs) = setEq eqs' eqs''
   where eqs'  = reductionN eqs
         eqs'' = reductionN eqs'
 
 transStripped = once . resize 10 $ do
-    eqs <- getEligible
-    let (_, eqs') = replaceTypes eqs
-        classes   = classesFromEqs eqs'
-        eligible  = not (all ((== 2) . length) classes)
+    Eqs eqs <- arbitrary
+    t       <- arbitrary
+    a       <- termOfType t
+    b       <- termOfType t
+    c       <- termOfType t
+    ds      <- listOf (termOfType t)
 
-        -- Choose a class with more than 2 elements
-        cls       = head (filter ((> 2) . length) classes)
-
-        -- Add a bunch of redundant equations between its members
-        extra     = eqs' ++ [Eq x y | x <- cls, y <- cls]
-        pruned    = reductionN extra
+    -- Add a bunch of redundant equations
+    eqs'    <- renameEqs (eqs ++ [Eq x y | x <- b:c:ds, y <- b:c:ds])
+    let (_, eqs'') = replaceTypes eqs'
+        pruned     = reductionN eqs''
 
     -- Check if (at least) our redundant equations got stripped out
-    return (length pruned <= length eqs)
-  where getEligible = do
-          Eqs eqs <- scale (+5) arbitrary
-          let classes  = classesFromEqs eqs
-              eligible = not (all ((== 2) . length) classes)
-          if eligible
-             then return eqs
-             else getEligible
+    return (length pruned <= length eqs + 2 + length ds)
 
-termsHaveType ty = forAllShrink (termOfType ty) checkType
+termsHaveType ty = forAll (termOfType ty) checkType
   where checkType trm = termType (setForTerm trm) == Just ty
 
 manualNatFindsEqs = once . monadicIO $ do
@@ -802,7 +795,7 @@ exampleFiles = do
         isJson :: String -> Bool
         isJson x = reverse ".json" == take 5 (reverse x)
 
-withExamples = forAllShrink (elements exampleEqs)
+withExamples = forAll (elements exampleEqs)
 
 -- Random input generators
 
@@ -814,12 +807,12 @@ instance Arbitrary Equations where
 
   arbitrary = do
       -- Make a bunch of terms and declare them equal
-      classEqs <- scale (`div` 2) (listOf mkClass)
+      classEqs <- scale (\s -> min 5 (s `div` 2)) (listOf mkClass)
       let eqs = concat classEqs
 
       -- Pad out with filler
-      pre  <- scale (`div` 2) arbitrary
-      post <- scale (`div` 2) arbitrary
+      pre  <- scale (\s -> min 5 (s `div` 2)) arbitrary
+      post <- scale (\s -> min 5 (s `div` 2)) arbitrary
 
       -- Make sure it's consistent
       eqs' <- renameEqs (pre ++ eqs ++ post)
@@ -1071,7 +1064,7 @@ dbg :: (Show a, Monad m) => a -> PropertyM m ()
 dbg = monitor . counterexample . show
 
 doOnce :: (Show a, Arbitrary a, Testable prop) => (a -> prop) -> Property
-doOnce = once . forAllShrink (resize 42 arbitrary)
+doOnce = once . forAll (resize 42 arbitrary)
 
 -- | The list of all terms equal to `x`, according to `eqs`
 eqClosure :: [Equation] -> Term -> Seq.Seq Term
