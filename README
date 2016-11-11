@@ -1,0 +1,125 @@
+# Reduce Equations #
+
+This package provides a command `reduce-equations` which reads in a list of
+equations from stdin, performs some simplification, and writes the results to
+stdout.
+
+For example, given the equations `a = b`, `b = c` and `a = c`, one of these will
+be removed as it can be inferred from the other two. Similarly, given equations
+`f a = g`, `f b = g` and `a = b`, one of the first equations will be removed as
+it can be recovered by subtitution.
+
+All of the real work is done by [QuickSpec](https://hackage.haskell.org/package/quickspec)
+This package just provides stdio and machine-friendly formatting.
+
+## Formats ##
+
+All IO is encoded in JSON. Both stdin and stdout should contain a single array
+of equations. The following example gives a single equation, which if written in
+a more human-friendly form, would be `plus x x = times x 2`:
+
+```
+[
+ {"relation": "~=",
+  "lhs":      {"role": "application",
+               "lhs":  {"role": "application",
+                        "lhs":  {"role":   "constant",
+                                 "type":   "Int -> Int -> Int",
+                                 "symbol": "plus"},
+                        "rhs":  {"role": "variable",
+                                 "type": "Int",
+                                 "id":   0}},
+               "rhs":  {"role": "variable",
+                        "type": "Int",
+                        "id":   0}},
+  "rhs":      {"role": "application",
+               "lhs":  {"role": "application",
+                        "lhs":  {"role":   "constant",
+                                 "type":   "Int -> Int -> Int",
+                                 "symbol": "times"},
+                        "rhs":  {"role": "variable",
+                                 "type": "Int",
+                                 "id":   0}},
+               "rhs":  {"role":   "constant",
+                        "type":   "Int",
+                        "symbol": "two"}}}
+]
+```
+
+### Equations ###
+
+An equation is an object with the following values:
+
+ - `relation`: This is used mostly to identify that we've got an equation. In
+   practice, this is always `"~="` (what that means is up to you).
+ - `lhs`: this is a `term`, supposedly the left-hand-side of the equation,
+   although the only difference from `rhs` is the name.
+ - `rhs`: this is a `term`, just like `lhs` except it's the right-hand-side.
+
+Example:
+
+```
+{"relation": "~=",
+  "lhs":     {"role": "application",
+              "lhs":  {"role":   "constant",
+                       "type":   "Bool -> Bool",
+                       "symbol": "not"},
+              "rhs":  {"role": "application",
+                       "lhs": {"role":   "constant",
+                               "type":   "Bool -> Bool",
+                               "symbol": "not"},
+                       "rhs": {"role": "variable",
+                               "type": "Bool",
+                               "id": 0}}},
+  "rhs":     {"role": "variable",
+              "type": "Bool",
+              "id":   0}}
+```
+
+### Terms ###
+
+A term is an object containing a `role`, which is one of `"constant"`,
+`"variable"` or `"application"`. The other fields depend on what the term's
+`role` is:
+
+ - Constants
+    - `type`: The type of the constant, a string written in Haskell's type
+      notation. This is taken from the given function descriptions. For example
+      `"Int -> (Int -> Bool) -> IO Float"`
+    - `symbol`: The name of the constant, as a string. For example `"reverse"`.
+ - Variables
+    - `type`: The type of the variable, a string written in Haskell's type
+      notation. Variables are automatically added to a signature to be used as
+      arguments to the given functions. For example `"[Int]"`.
+    - `"id"`: A numeric ID for the variable. IDs start at `0`. Three variables
+      are added for each argument type. For example, to represent three integer
+      variables we might use `{"role": "variable", "type": "Int", "id":0}`,
+      `{"role": "variable", "type": "Int", "id":1}` and
+      `{"role": "variable", "type": "Int", "id":2}`.
+ - Applications
+    - `lhs`: A term representing a function to apply.
+    - `rhs`: A term representing the argument to apply the `lhs` function to.
+      Functions are curried, so calling with multiple arguments should be done
+      via a left-leaning tree.
+
+## Implementation Notes ##
+
+We co-opt the equation-reducing machinery of the
+[QuickSpec](https://hackage.haskell.org/package/quickspec-0.9.6) library to do
+the actual reduction. This relies heavily on existential types and Haskell's
+[Typeable](https://hackage.haskell.org/package/base-4.9.0.0/docs/Data-Typeable.html)
+mechanism.
+
+Since the incoming equations may have arbitrary types, and GHC doesn't let us
+define custom `Typeable` instances, we perform a conversion step:
+
+ - Once an array of equations has been parsed, we recurse through the terms and
+   switch out each distinct type with a freshly-generated replacement, of the
+   form `Z`, `S Z`, `S (S Z)`, etc. (these are just Peano numerals, e.g. see
+   https://en.wikipedia.org/wiki/Successor_function )
+ - We provide special functions `getRep` and `getVal` to plumb these Peano types
+   into QuickSpec's machinery, convincing it that we have a signature of
+   well-typed terms.
+ - We reduce the given equations, with their switched-out types, to get a
+   reduced set.
+ - We switch back the types for presentation purposes, pretty-printing to JSON.

@@ -2,11 +2,11 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                reduce-equations
-version:             0.1.0.5
+version:             0.1.1.0
 synopsis:            Simplify a set of equations by removing redundancies
 -- description:         
 homepage:            http://chriswarbo.net/git/reduce-equations
-license:             PublicDomain
+license:             BSD3
 license-file:        LICENSE
 author:              Chris Warburton
 maintainer:          chriswarbo@gmail.com
@@ -28,7 +28,7 @@ library
                      , bytestring
                      , containers
                      , QuickCheck
-                     , quickspec
+                     , quickspec == 0.9.6
                      , transformers
                      , mtl
                      , mlspec-helper
@@ -55,7 +55,7 @@ test-suite test
   main-is:             Main.hs
   build-depends:       base >= 4.8
                      , reduce-equations
-                     , quickspec
+                     , quickspec == 0.9.6
                      , directory
                      , aeson
                      , bytestring
