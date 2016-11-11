@@ -33,7 +33,7 @@ library
                      , Math.Equation.Internal.Types
   -- other-modules:       
   -- other-extensions:    
-  build-depends:       base >= 4.8
+  build-depends:       base >= 4.8 && <= 4.9
                      , aeson
                      , bytestring
                      , containers
@@ -52,7 +52,7 @@ executable reduce-equations
   main-is:             Main.hs
   -- other-modules:       
   -- other-extensions:    
-  build-depends:       base >= 4.8
+  build-depends:       base >= 4.8 && <= 4.9
                      , reduce-equations
                      , aeson
   hs-source-dirs:      reduce-equations
@@ -63,7 +63,7 @@ test-suite test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Main.hs
-  build-depends:       base >= 4.8
+  build-depends:       base >= 4.8 && <= 4.9
                      , reduce-equations
                      , quickspec == 0.9.6
                      , directory
