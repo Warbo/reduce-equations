@@ -33,7 +33,7 @@ library
                      , Math.Equation.Internal.Types
   -- other-modules:       
   -- other-extensions:    
-  build-depends:       base >=4.8 && <4.9
+  build-depends:       base >= 4.8
                      , aeson
                      , bytestring
                      , containers
@@ -52,7 +52,7 @@ executable reduce-equations
   main-is:             Main.hs
   -- other-modules:       
   -- other-extensions:    
-  build-depends:       base >=4.8 && <4.9
+  build-depends:       base >= 4.8
                      , reduce-equations
                      , aeson
   hs-source-dirs:      reduce-equations
