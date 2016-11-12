@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, ExistentialQuantification, PartialTypeSignatures #-}
-module Math.Equation.Internal (
-    module Math.Equation.Internal.Eval
-  , module Math.Equation.Internal.Types
+module Algebra.Equation.Internal (
+    module Algebra.Equation.Internal.Eval
+  , module Algebra.Equation.Internal.Types
   ) where
 
-import Math.Equation.Internal.Eval  -- Used for interacting with QuickSpec
-import Math.Equation.Internal.Types -- Our own representations
+import Algebra.Equation.Internal.Eval  -- Used for interacting with QuickSpec
+import Algebra.Equation.Internal.Types -- Our own representations

@@ -89,10 +89,13 @@ A term is an object containing a `role`, which is one of `"constant"`,
     - `symbol`: The name of the constant, as a string. For example `"reverse"`.
  - Variables
     - `type`: The type of the variable, a string written in Haskell's type
-      notation. Variables are automatically added to a signature to be used as
-      arguments to the given functions. For example `"[Int]"`.
-    - `"id"`: A numeric ID for the variable. IDs start at `0`. Three variables
-      are added for each argument type. For example, to represent three integer
+      notation. The types can be made up, but they should be consistent (e.g.
+      both sides of an equation should have the same type; application should be
+      well-typed; etc.). Unification of polymorphic types isn't supported; types
+      are identified syntactically. For example `"[Int]"`.
+    - `"id"`: A numeric ID for the variable. IDs start at `0`. Used to
+      distinguish between multiple variables of the same type. Variable ID only
+      matters within a single equation. For example, to represent three integer
       variables we might use `{"role": "variable", "type": "Int", "id":0}`,
       `{"role": "variable", "type": "Int", "id":1}` and
       `{"role": "variable", "type": "Int", "id":2}`.

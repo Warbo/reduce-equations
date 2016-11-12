@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Math.Equation.Reduce where
+module Algebra.Equation.Reduce where
 
 import           Data.Aeson
 import qualified Data.ByteString.Lazy.Char8 as BS
@@ -11,8 +11,8 @@ import qualified Data.Stringable         as S
 import qualified Data.Text.Lazy          as T
 import qualified Data.Text.Lazy.Encoding as TE
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
-import           Math.Equation.Internal.Eval
-import           Math.Equation.Internal.Types
+import           Algebra.Equation.Internal.Eval
+import           Algebra.Equation.Internal.Types
 
 doReduce = parseAndReduce <$> BS.getContents >>= showEqs
 

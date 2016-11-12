@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, PartialTypeSignatures, ScopedTypeVariables, FlexibleInstances, UndecidableInstances, RankNTypes, GADTs #-}
 
-module Math.Equation.Internal.Eval where
+module Algebra.Equation.Internal.Eval where
 
 -- We want to use QuickSpec's `prune` function to minimise a set of equations,
 -- but this is tricky since its `Symbol` type contains a `TypeRep`. We can
@@ -22,7 +22,7 @@ import Data.String
 import Data.Typeable
 import qualified Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
-import Math.Equation.Internal.Types
+import Algebra.Equation.Internal.Types
 import MLSpec.Helper
 import System.Environment
 import System.IO

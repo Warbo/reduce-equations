@@ -16,8 +16,8 @@ import           Data.Text.Encoding
 import           Data.Typeable
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
-import           Math.Equation.Internal
-import           Math.Equation.Reduce
+import           Algebra.Equation.Internal
+import           Algebra.Equation.Reduce
 import           Numeric.Natural
 import           System.Directory
 import           System.IO.Unsafe

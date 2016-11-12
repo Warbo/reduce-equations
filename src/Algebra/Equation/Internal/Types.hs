@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
 
-module Math.Equation.Internal.Types where
+module Algebra.Equation.Internal.Types where
 
 import           Control.Monad
 import           Data.Aeson

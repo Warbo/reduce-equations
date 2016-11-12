@@ -1,6 +1,6 @@
 module Main where
 
-import Math.Equation.Reduce
+import Algebra.Equation.Reduce
 import System.Environment
 
 main = doReduce

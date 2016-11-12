@@ -24,16 +24,16 @@ cabal-version:       >=1.10
 
 source-repository head
   type:     git
-  location: http://chriswarbo.net/git/reduce-equations
+  location: http://chriswarbo.net/git/reduce-equations.git
 
 library
-  exposed-modules:     Math.Equation.Reduce
-                     , Math.Equation.Internal
-                     , Math.Equation.Internal.Eval
-                     , Math.Equation.Internal.Types
+  exposed-modules:     Algebra.Equation.Reduce
+                     , Algebra.Equation.Internal
+                     , Algebra.Equation.Internal.Eval
+                     , Algebra.Equation.Internal.Types
   -- other-modules:       
   -- other-extensions:    
-  build-depends:       base >= 4.8 && <= 4.9
+  build-depends:       base >= 4.8 && < 4.10
                      , aeson
                      , bytestring
                      , containers
@@ -52,7 +52,7 @@ executable reduce-equations
   main-is:             Main.hs
   -- other-modules:       
   -- other-extensions:    
-  build-depends:       base >= 4.8 && <= 4.9
+  build-depends:       base >= 4.8 && < 4.10
                      , reduce-equations
                      , aeson
   hs-source-dirs:      reduce-equations
@@ -63,7 +63,7 @@ test-suite test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Main.hs
-  build-depends:       base >= 4.8 && <= 4.9
+  build-depends:       base >= 4.8 && < 4.10
                      , reduce-equations
                      , quickspec == 0.9.6
                      , directory
