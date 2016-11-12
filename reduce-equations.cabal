@@ -41,7 +41,6 @@ library
                      , quickspec == 0.9.6
                      , transformers
                      , mtl
-                     , mlspec-helper
                      , haskell-src-exts >= 1.18.2
                      , stringable
                      , text

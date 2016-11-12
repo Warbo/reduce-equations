@@ -23,7 +23,6 @@ import Data.Typeable
 import qualified Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
 import Algebra.Equation.Internal.Types
-import MLSpec.Helper
 import System.Environment
 import System.IO
 import System.IO.Unsafe
