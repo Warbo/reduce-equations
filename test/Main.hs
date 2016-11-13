@@ -52,26 +52,26 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Sigs have variables"             sigsHaveVars
   , testProperty "Constants are distinct"          sigConstsUniqueIndices
   , testProperty "Variables are distinct"          sigVarsUniqueIndices
-  , testProperty "Can find closure of term"        canFindClosure
   , testProperty "No classes without equations"    noClassesFromEmptyEqs
   , testProperty "Equation induces a class"        getClassFromEq
   , testProperty "Classes contain given terms"     classesHaveTerms
   , testProperty "Equal terms in same class"       eqPartsAppearInSameClass
   , testProperty "Terms appear in one class"       classesHaveNoDupes
-  , testProperty "Class elements are equal"        classElementsAreEqual
-  , testProperty "Non-equal elements separate"     nonEqualElementsSeparate
   , testProperty "Classes have one arity"          classHasSameArity
+  , testProperty "Equations have one arity"        equationsHaveSameArity
+  , testProperty "Non-equal elements separate"     nonEqualElementsSeparate
+  , testProperty "Class elements are equal"        classElementsAreEqual
   , testProperty "Class length more than one"      classesNotSingletons
+  , testProperty "Can find closure of term"        canFindClosure
   , testProperty "Can get classes from sig"        canGetClassesFromEqs
   , testProperty "Can get sig from equations"      canGetSigFromEqs
   , testProperty "Sig has equation variables"      eqSigHasVars
   , testProperty "Sig has equation constants"      eqSigHasConsts
-  , testProperty "Equations have one arity"        equationsHaveSameArity
+  , testProperty "Can prune equations"             canPruneEqs
   , testProperty "Can get type of terms"           canGetTermType
   , testProperty "No trivial terms"                noTrivialTerms
   , testProperty "Equations are consistent"        eqsAreConsistent
   , testProperty "Switch function types"           switchFunctionTypes
-  , testProperty "Can prune equations"             canPruneEqs
   , testProperty "Type parsing regression"         regressionTypeParse
   , testProperty "Nat example has eqs"             natHasEqs
   , testProperty "Nat example outputs eqs"         natKeepsEqs
@@ -89,7 +89,6 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Can prune"                       justPrune
   , testProperty "New reduce"                      newReduce
   , testProperty "Reduce is idempotent"            reduceIdem
-  , testProperty "Redundant transitivity"          transStripped
   , testProperty "Generated terms have type"       termsHaveType
   , testProperty "Manual Nat finds eqs"            manualNatFindsEqs
   , testProperty "Fresh sig + parsed eqs works"    manualNatAllowsGiven
@@ -97,7 +96,7 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Fresh classes have parsed terms" topNatTermsFound
   , testProperty "Parsed classes have fresh terms" qsNatTermsFound
   , testProperty "Singleton classes generated"     natClassesIncludeSingletons
-  , testProperty "Class contents match exactly"    exactClassMatch
+  , testProperty "Can prune converted equations"   convertPrunes
   , testProperty "Pruned eqs match"                parsedEqsPrune
   , testProperty "Fresh Nat reduces own eqs"       manualNatReducesSelf
   ]
@@ -225,12 +224,6 @@ sigVarsUniqueIndices' s (Var t _ a) = hasVars
                         (map varName (sigVars sig))
         vars    = [Var t i a | i <- [0..10]]
         sig     = withVars vars s
-
--- Some vars get split over multiple lines
-readVars s = accumulate [] (lines s)
-  where accumulate (v:vs) (l@(' ':_):ls) = accumulate ((v ++ l):vs) ls
-        accumulate    vs  (l        :ls) = accumulate       (l :vs) ls
-        accumulate    vs  []             = vs
 
 noClassesFromEmptyEqs = null (classesFromEqs [])
 
@@ -508,22 +501,6 @@ reduceIdem' (Eqs eqs) = setEq eqs' eqs''
   where eqs'  = reduction eqs
         eqs'' = reduction eqs'
 
-transStripped = once . resize 10 $ do
-    Eqs eqs <- arbitrary
-    t       <- arbitrary
-    a       <- termOfType t
-    b       <- termOfType t
-    c       <- termOfType t
-    ds      <- listOf (termOfType t)
-
-    -- Add a bunch of redundant equations
-    eqs'    <- renameEqs (eqs ++ [Eq x y | x <- b:c:ds, y <- b:c:ds])
-    let (_, eqs'') = replaceTypes eqs'
-        pruned     = reduction eqs''
-
-    -- Check if (at least) our redundant equations got stripped out
-    return (length pruned <= length eqs + 2 + length ds)
-
 termsHaveType ty = forAll (termOfType ty) checkType
   where checkType trm = termType (setForTerm trm) == Just ty
 
@@ -592,15 +569,6 @@ qsNatTermsFound = case unfoundInOurs of
         eqs' = map (replaceEqTypes db) parsedNatEqs
 
 natClassesIncludeSingletons = any ((== 1) . length) natClasses
-
--- We compare the "show" output, to avoid irrelevant details like symbol indices
-exactClassMatch = counterexample (show (("ourClasses", ourClasses),
-                                        ("qsClasses'", qsClasses')))
-                                 (ourClasses == qsClasses')
-  where ourClasses = map (Test.QuickSpec.Utils.Typed.several (map term))
-                         (unSomeClassesN2 parsedNatEqs' natSig')
-        qsClasses  = filter ((> 1) . length) natClasses
-        qsClasses' = replaceQSTypes naturalDb qsClasses
 
 convertPrunes = length (doPrune qsClasses natSig') == 10
   where qsClasses  = filter (Test.QuickSpec.Utils.Typed.several ((> 1) . length))
