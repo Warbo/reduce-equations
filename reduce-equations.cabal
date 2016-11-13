@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                reduce-equations
-version:             0.1.1.0
+version:             0.1.1.1
 synopsis:            Simplify a set of equations by removing redundancies
 description:         Simplify a set of equations by removing redundancies
 homepage:            http://chriswarbo.net/projects/repos/reduce-equations.html
