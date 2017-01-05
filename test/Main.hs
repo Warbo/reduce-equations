@@ -2,6 +2,7 @@
 
 module Main where
 
+import           Control.Monad
 import           Data.Aeson
 import qualified Data.ByteString              as B
 import qualified Data.ByteString.Lazy         as LB
@@ -159,6 +160,7 @@ constantsAdded cs s = case withConsts cs s of
 variablesAdded vs s = case withVars vs s of
   Sig _ vs' -> all (`elem` vs') vs
 
+{-# ANN sigsRender ("HLint: ignore Length always non-negative" :: String) #-}
 sigsRender = once $ do
     eqs <- resize 20 genNormalisedEqs
     let sig = sigFromEqs eqs
@@ -173,7 +175,9 @@ sigsHaveConsts = once $ do
       names         = map constName cs
   return (checkNames names consts)
 
-sigsHaveVars = once (forAll (resize 42 genNormalisedEqs) sigsHaveVars')
+sigsHaveVars = once (forAllShrink (resize 42 genNormalisedEqs)
+                                  shrink
+                                  sigsHaveVars')
 sigsHaveVars' eqs =
   let s@(Sig _ vs) = sigFromEqs eqs
 
@@ -228,6 +232,7 @@ sigVarsUniqueIndices' s (Var t _ a) = hasVars
 noClassesFromEmptyEqs = null (classesFromEqs [])
 
 -- Sub-terms are added, which can make more than one class
+{-# ANN getClassFromEq ("HLint: ignore Use null" :: String) #-}
 getClassFromEq eq = length (classesFromEqs [eq]) >= 1
 
 classesHaveTerms eqs = found `all` terms
@@ -276,7 +281,9 @@ nonEqualElementsSeparate' (t, v) = all found expected
 
         match xs ys = all (\x -> any (setEq x) ys) xs
 
-classElementsAreEqual = once (forAll (resize 42 arbitrary) classElementsAreEqual')
+classElementsAreEqual = once (forAllShrink (resize 42 arbitrary)
+                                           shrink
+                                           classElementsAreEqual')
 classElementsAreEqual' (Eqs eqs) = all elementsAreEqual classes
   where classes :: [[Term]]
         classes              = classesFromEqs eqs
@@ -345,7 +352,9 @@ eqSigHasConsts eqs = counterexample debug test
                           ("sigconsts", sigconsts),
                           ("eqconsts",  eqconsts))
 
-canPruneEqs = once (forAll (resize 20 arbitrary) canPruneEqs')
+canPruneEqs = once (forAllShrink (resize 20 arbitrary)
+                                 shrink
+                                 canPruneEqs')
 canPruneEqs' (Eqs eqs) = counterexample (show (("eqs", eqs), ("eqs'", eqs')))
                                         (expected eqs')
   where expected []     =      null eqs -- No output when no eqs
@@ -433,14 +442,13 @@ extractedTypesUnique (Eqs eqs) = counterexample (show types)
                                                 (nub types == types)
   where types = allTypes eqs
 
-convertTypesIso =
-  (forAll (resize 20 arbitrary)
-               (\x -> case convertTypesIso' x of
-                           ([],        [])        -> property True
-                           (extraEqs', extraConv) ->
-                             counterexample (show (("extraEqs'", extraEqs'),
-                                                   ("extraConv", extraConv)))
-                                            (property False)))
+convertTypesIso = forAllShrink (resize 20 arbitrary)
+                               shrink
+                               (\x -> case convertTypesIso' x of
+                                 ([],        [])        -> property True
+                                 y@(extraEqs', extraConv) ->
+                                   counterexample (show ("y", y))
+                                                  (property False))
 convertTypesIso' (Eqs eqs) =
   let (_, eqs') = replaceTypes eqs
       qsEqs     = Test.QuickSpec.Equation.equations qsClss
@@ -468,6 +476,7 @@ canMakeVars = do
   v <- genNormalisedVar
   return True
 
+{-# ANN canMakeQSSigs ("HLint: ignore Use null" :: String) #-}
 canMakeQSSigs = do
   v <- genNormalisedVar
   let sig = renderQSVars [v]
@@ -484,19 +493,25 @@ lookupVars = once $ do
       foundName  = Test.QuickSpec.Term.name symbol
   return (expectName == foundName)
 
+{-# ANN justPrune ("HLint: ignore Length always non-negative" :: String) #-}
 justPrune = once $ do
     eqs <- resize 20 arbitrary
     let (_, eqs') = replaceTypes eqs
         o = pruneEqsN eqs'
     return (length o >= 0)
 
-newReduce = once (forAll (resize 20 arbitrary) newReduce')
+newReduce = once (forAllShrink (resize 20 arbitrary)
+                               shrink
+                               newReduce')
+{-# ANN newReduce' ("HLint: ignore Use null" :: String) #-}
 newReduce' (Eqs eqs) = counterexample (show (("eqs",    eqs),
                                              ("result", result)))
                                       (length (show result) > 0)
   where result = reduction eqs
 
-reduceIdem = once (forAll (resize 20 arbitrary) reduceIdem')
+reduceIdem = once (forAllShrink (resize 20 arbitrary)
+                                shrink
+                                reduceIdem')
 reduceIdem' (Eqs eqs) = setEq eqs' eqs''
   where eqs'  = reduction eqs
         eqs'' = reduction eqs'
@@ -515,6 +530,7 @@ manualNatFindsEqs = once . monadicIO $ do
   -- Our golden input should match these
   assert (length eqs == length rawEqs)
 
+{-# ANN manualNatAllowsGiven ("HLint: ignore Use null" :: String) #-}
 manualNatAllowsGiven = counterexample (show eqs')
                                       ((length eqs' >  0) &&
                                        (length eqs' <= length parsedNatEqs))
@@ -676,7 +692,7 @@ exampleFiles = do
         isJson :: String -> Bool
         isJson x = reverse ".json" == take 5 (reverse x)
 
-withExamples = forAll (elements exampleEqs)
+withExamples = forAllShrink (elements exampleEqs) shrink
 
 -- Random input generators
 
@@ -945,7 +961,7 @@ dbg :: (Show a, Monad m) => a -> PropertyM m ()
 dbg = monitor . counterexample . show
 
 doOnce :: (Show a, Arbitrary a, Testable prop) => (a -> prop) -> Property
-doOnce = once . forAll (resize 42 arbitrary)
+doOnce = once . forAllShrink (resize 42 arbitrary) shrink
 
 -- | The list of all terms equal to `x`, according to `eqs`
 eqClosure :: [Equation] -> Term -> Seq.Seq Term
@@ -1005,15 +1021,15 @@ instance Show Test.QuickSpec.Reasoning.CongruenceClosure.S where
 dbgEqs = map (Test.QuickSpec.Utils.Typed.some
                (Test.QuickSpec.Equation.showTypedEquation natSig))
 
+{-# NOINLINE rawNatEqs #-}
 rawNatEqs = unsafePerformIO (LB.readFile "test/data/nat-simple-raw.json")
 
 Right parsedNatEqs = eitherDecode rawNatEqs :: Either String [Equation]
 
 (typeDb, parsedNatEqs') = replaceTypes parsedNatEqs
 
-doReps clss = map (Test.QuickSpec.Utils.Typed.some2
-                    (Test.QuickSpec.Utils.Typed.tagged term . head))
-                  clss
+doReps = map (Test.QuickSpec.Utils.Typed.some2
+               (Test.QuickSpec.Utils.Typed.tagged term . head))
 
 natClasses = map (Test.QuickSpec.Utils.Typed.several
                    (map Test.QuickSpec.Term.term))
@@ -1025,7 +1041,7 @@ rawNatClasses' = swapTypes' naturalDb rawNatClasses
 swapTypes' db = map (Test.QuickSpec.Utils.Typed.several
                       (\xs -> let trep = head (typeRepArgs (typeRep xs))  -- Strip off [] and Expr
                                   typ  = case HSE.Parser.parseType (show trep) of
-                                    HSE.Parser.ParseOk x -> unwrapParens (fmap (const ()) x)
+                                    HSE.Parser.ParseOk x -> unwrapParens (void x)
                                   typ' = replaceInType db typ
                                in case getVal (getRep typ') of
                                     MkHT x -> Test.QuickSpec.Utils.Typed.Some
@@ -1040,6 +1056,7 @@ swapTypes' db = map (Test.QuickSpec.Utils.Typed.several
                                                          })
                                                        xs))))
 
+{-# NOINLINE rawNatClasses #-}
 rawNatClasses :: [Test.QuickSpec.Utils.Typed.Several Test.QuickSpec.Term.Expr]
 rawNatClasses = concatMap (Test.QuickSpec.Utils.Typed.some2
                             (map (Test.QuickSpec.Utils.Typed.Some .
@@ -1053,9 +1070,10 @@ rawNatClasses = concatMap (Test.QuickSpec.Utils.Typed.some2
 
 tType (Test.QuickSpec.Term.Var   s) = Test.QuickSpec.Utils.Typeable.unTypeRep (Test.QuickSpec.Term.symbolType s)
 tType (Test.QuickSpec.Term.Const s) = Test.QuickSpec.Utils.Typeable.unTypeRep (Test.QuickSpec.Term.symbolType s)
-tType (Test.QuickSpec.Term.App l r) = case funResultTy (tType l) (tType r) of
-  Nothing -> error ("Incompatible types (" ++ show (tType l) ++ ") (" ++ show (tType r) ++ ")")
-  Just t  -> t
+tType (Test.QuickSpec.Term.App l r) =
+  fromMaybe (error (concat ["Incompatible types (", show (tType l), ") (",
+                                                    show (tType r), ")"]))
+            (funResultTy (tType l) (tType r))
 
 replaceQSTypes :: [(Type, Type)] -> [[Test.QuickSpec.Term.Term]] -> [[Test.QuickSpec.Term.Term]]
 replaceQSTypes db = map rep
@@ -1090,7 +1108,7 @@ replaceQSType db t =
            (replaceQSType db l)
            (replaceQSType db r)
   where prs x = case HSE.Parser.parseType (show x) of
-          HSE.Parser.ParseOk typ -> unwrapParens (fmap (const ()) typ)
+          HSE.Parser.ParseOk typ -> unwrapParens (void typ)
           HSE.Parser.ParseFailed _ e -> error (concat [
                                "Failed to replace QuickSpec type '",
                                show t,

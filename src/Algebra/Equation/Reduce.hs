@@ -61,8 +61,8 @@ allTypes = nub . filter notFunc
         termTypes (App l r t) = [unwrapParens <$> t] ++ termTypes l ++ termTypes r
         termTypes t           = [unwrapParens <$> termType t]
 
-        notFunc (HSE.Syntax.TyFun _ _ _) = False
-        notFunc _                        = True
+        notFunc HSE.Syntax.TyFun{} = False
+        notFunc _                  = True
 
         components (HSE.Syntax.TyFun _ i o) = components i ++ components o
         components t                        = [t]

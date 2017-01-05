@@ -8,25 +8,25 @@ module Algebra.Equation.Internal.Eval where
 -- easily.
 
 -- To work around this, we don't attempt to de-serialise any `TypeRep`, e.g. via
--- a function like `String -> TypeRep`; instead, since a serialised `TypeRep` is
--- just a `String` of Haskell source code corresponding to a type, we turn our
--- `prune`-invoking function into Haskell source code as well, and append the
--- `TypeRep`s as needed, as type annotations.
+-- a function like `String -> TypeRep`; instead, we make sure all types are
+-- converted to our `Z` and `S a` types, and we write specific functions for
+-- turning these values into `TypeRep`s.
 
-import Data.Dynamic
-import Data.List
-import Data.Maybe
+import           Algebra.Equation.Internal.Types
+import           Control.Monad
+import           Data.Dynamic
+import           Data.List
 import qualified Data.Map
+import           Data.Maybe
 import qualified Data.Ord
-import Data.String
-import Data.Typeable
-import qualified Language.Haskell.Exts.Syntax
+import           Data.String
+import           Data.Typeable
 import qualified Language.Haskell.Exts.Parser as HSE.Parser
-import Algebra.Equation.Internal.Types
-import System.Environment
-import System.IO
-import System.IO.Unsafe
-import Text.Read  -- Uses String as part of base, not Text
+import qualified Language.Haskell.Exts.Syntax
+import           System.Environment
+import           System.IO
+import           System.IO.Unsafe
+import           Text.Read -- Uses String as part of base, not Text
 
 -- Used for their types
 import qualified Test.QuickCheck.Gen
@@ -151,6 +151,7 @@ getRep t = case t of
 -- getVal can return a (wrapped up) value of the correct type. Since we should
 -- only need these values in order to match up their TypeReps, this should be
 -- sufficient.
+{-# ANN getVal ("HLint: ignore Redundant case" :: String) #-}
 getVal :: TypeRep -> HasType
 getVal tr = case () of
     _ | thisCon == zCon   -> MkHT (Z ())
@@ -214,12 +215,8 @@ classesFromEqs eqs = combine [] clss'
 
         subTerms (C _)       = []
         subTerms (V _)       = []
-        subTerms (App l r _) = let l' = if termArity l == Arity 0
-                                           then [l]
-                                           else []
-                                   r' = if termArity l == Arity 0
-                                           then [l]
-                                           else []
+        subTerms (App l r _) = let l' = [l | termArity l == Arity 0]
+                                   r' = [r | termArity r == Arity 0]
                                    ls = if termArity l > Arity 0
                                            then subTerms l
                                            else []
@@ -258,7 +255,7 @@ unSomeClassesN2 eqs sig = collectExprs result
 unSomeSortedClasses classes sig =
   unSomeSortedQSClasses (map (mkUnSomeClassN2 sig) classes)
 
-unSomeSortedQSClasses classes = sortBy multi classes
+unSomeSortedQSClasses = sortBy multi
   where multi (x:_) (y:_) = compareTerms x y
 
 compareTerms (Test.QuickSpec.Utils.Typed.Some x) (Test.QuickSpec.Utils.Typed.Some y) =
@@ -284,8 +281,7 @@ collectExprs (xs:xss) = collectOne xs : collectExprs xss
                              (Test.QuickSpec.Utils.Typed.O (x':y:xs'))
 
 mkUnSomeClassN :: Test.QuickSpec.Signature.Sig -> [Term] -> [Test.QuickSpec.Term.Expr a]
-mkUnSomeClassN sig []     = []
-mkUnSomeClassN sig (x:xs) = termToExprN x sig : mkUnSomeClassN sig xs
+mkUnSomeClassN sig = map (`termToExprN` sig)
 
 mkUnSomeClassN2 :: Test.QuickSpec.Signature.Sig
                 -> [Term]
@@ -297,10 +293,10 @@ mkUnSomeClassN2' sig (x:xs) =
     case termType (setForTerm x) of
          Nothing -> error ("No type for " ++ show x)
          Just t  -> case getVal (getRep t) of
-                         MkHT v -> (Test.QuickSpec.Utils.Typed.Some
+                         MkHT v -> Test.QuickSpec.Utils.Typed.Some
                                      (Test.QuickSpec.Term.Expr term
                                                                arity
-                                                               (const v))) : xs'
+                                                               (const v)) : xs'
   where term        = renderTermN x sig
         Arity arity = termArity x
         xs' = mkUnSomeClassN2' sig xs
@@ -355,7 +351,7 @@ mkEqs2N cs = sort (concatMap f cs)
 
 termToExprN :: Term
             -> Test.QuickSpec.Signature.Sig
-            -> (Test.QuickSpec.Term.Expr a)
+            -> Test.QuickSpec.Term.Expr a
 termToExprN t sig = Test.QuickSpec.Term.Expr term arity eval
   where term        = renderTermN t sig
         Arity arity = termArity t
@@ -384,7 +380,7 @@ symToVar s =
   let n              = Test.QuickSpec.Term.name s
       [_, rawT, idx] = splitCommas n
    in Var (case HSE.Parser.parseType rawT of
-             HSE.Parser.ParseOk t'        -> unwrapParens (const () <$> t')
+             HSE.Parser.ParseOk t'        -> unwrapParens (void t')
              HSE.Parser.ParseFailed _ err -> error (concat [
                                     "Failed to parse var type: ",
                                     err,
@@ -398,7 +394,7 @@ symToConst s =
    in Const (Arity (Test.QuickSpec.Term.symbolArity s))
             (Name (Test.QuickSpec.Term.name s))
             (case t of
-               HSE.Parser.ParseOk t'        -> unwrapParens (const () <$> t')
+               HSE.Parser.ParseOk t'        -> unwrapParens (void t')
                HSE.Parser.ParseFailed _ err -> error (concat [
                                       "Failed to parse const type: ",
                                       err,

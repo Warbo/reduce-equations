@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Algebra.Equation.Internal.Types where
 
@@ -85,12 +86,10 @@ instance ToJSON Term where
                          "rhs"  .= toJSON r]
 
 instance FromJSON Term where
-  parseJSON (Object v) = do
-    role <- v .: "role"
-    case (role :: String) of
-         "variable"    -> V <$> parseJSON (Object v)
-         "constant"    -> C <$> parseJSON (Object v)
-         "application" -> App <$> v .: "lhs" <*> v .: "rhs" <*> return Nothing
+  parseJSON (Object v) = v .: "role" >>= \x -> case (x :: String) of
+    "variable"    -> V   <$> parseJSON (Object v)
+    "constant"    -> C   <$> parseJSON (Object v)
+    "application" -> App <$> v .: "lhs" <*> v .: "rhs" <*> return Nothing
   parseJSON _          = mzero
 
 data Sig = Sig [Const] [Var] deriving (Show)
@@ -148,7 +147,7 @@ instance FromJSON Type where
   parseJSON _          =    mzero
 
 stripLoc :: HSE.Syntax.Type a -> Type
-stripLoc = fmap (const ())
+stripLoc = void
 
 data Name = Name String deriving (Show, Eq, Ord)
 
