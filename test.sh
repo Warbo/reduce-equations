@@ -19,7 +19,7 @@ report "$?" "cabal test"
 
 for F in test/data/*.json
 do
-    OUTPUT=$(NIX_EVAL_EXTRA_IMPORTS='[("runtime-arbitrary", "TestInstances")]' \
+    OUTPUT=$(NIX_EVAL_EXTRA_IMPORTS='[("runtime-arbitrary", "Test.TestInstances")]' \
                cabal run -v0 reduce-equations < "$F")
     report "$?" "Reducing $F"
 
