@@ -151,17 +151,16 @@ getRep t = case t of
 -- getVal can return a (wrapped up) value of the correct type. Since we should
 -- only need these values in order to match up their TypeReps, this should be
 -- sufficient.
-{-# ANN getVal ("HLint: ignore Redundant case" :: String) #-}
 getVal :: TypeRep -> HasType
-getVal tr = case () of
-    _ | thisCon == zCon   -> MkHT (Z ())
-    _ | thisCon == sCon   -> case typeRepArgs tr of
-                                  []   -> error ("No args in " ++ show tr)
-                                  x:xs -> case getVal x of
-                                               MkHT x -> MkHT (S x)
-    _ | thisCon == funCon -> case map getVal (typeRepArgs tr) of
-                                  [MkHT i, MkHT o] -> MkHT (\x -> case asTypeOf i x of
-                                                                       _ -> o)
+getVal tr = Data.Map.fromList [
+      (zCon,   MkHT (Z ()))
+    , (sCon,   case typeRepArgs tr of
+                    []   -> error ("No args in " ++ show tr)
+                    x:xs -> case getVal x of
+                                 MkHT x -> MkHT (S x))
+    , (funCon, case map getVal (typeRepArgs tr) of
+                    [MkHT i, MkHT o] -> MkHT (\x -> asTypeOf i x `seq` o))
+    ] Data.Map.! thisCon
   where thisCon = typeRepTyCon tr
         funCon  = typeRepTyCon (typeRep [not])  -- Simple monomorphic function
         zCon    = typeRepTyCon (typeRep [Z ()])
