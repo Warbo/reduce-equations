@@ -1,0 +1,14 @@
+From: Chris Warburton
+Date: Tue, 07 Nov 2017 13:23:14 +0000
+State: new
+Subject: Wrap results in array, if given array
+Message-Id: <e039a3ea21574808-0-artemis@nixos>
+
+If we're given a JSON array, we should output a JSON array.
+
+It might be nice to read in a sequence of objects (i.e.
+'{...}\n{...}\n...'), in which case we should output a sequence of
+objects too.
+
+However, the point is that we shouldn't change the representation of our
+input. Currently we're reading in an array and outputting a sequence.

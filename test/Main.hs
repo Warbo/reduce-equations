@@ -1,7 +1,10 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings, PartialTypeSignatures, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings, PartialTypeSignatures,
+    ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances,
+    FlexibleContexts #-}
 
 module Main where
 
+import           Control.DeepSeq (deepseq)
 import           Control.Monad
 import           Data.Aeson
 import qualified Data.ByteString              as B
@@ -35,7 +38,7 @@ import qualified Test.QuickSpec.Utils.Typeable
 import qualified Test.QuickSpec.Utils.Typed
 import qualified Test.QuickSpec.Utils.TypeMap
 import qualified Test.QuickSpec.Term
-import           Test.Tasty            (defaultMain, testGroup, localOption)
+import           Test.Tasty (defaultMain, testGroup, localOption)
 import           Test.Tasty.QuickCheck
 
 main = defaultMain $ testGroup "All tests" [
@@ -160,12 +163,11 @@ constantsAdded cs s = case withConsts cs s of
 variablesAdded vs s = case withVars vs s of
   Sig _ vs' -> all (`elem` vs') vs
 
-{-# ANN sigsRender ("HLint: ignore Length always non-negative" :: String) #-}
 sigsRender = once $ do
     eqs <- resize 20 genNormalisedEqs
     let sig = sigFromEqs eqs
         s   = show (renderN sig :: Test.QuickSpec.Signature.Sig)
-    return (length s >= 0)
+    s `deepseq` return True
 
 sigsHaveConsts = once $ do
   eqs <- resize 42 genNormalisedEqs
@@ -232,8 +234,8 @@ sigVarsUniqueIndices' s (Var t _ a) = hasVars
 noClassesFromEmptyEqs = null (classesFromEqs [])
 
 -- Sub-terms are added, which can make more than one class
-{-# ANN getClassFromEq ("HLint: ignore Use null" :: String) #-}
-getClassFromEq eq = length (classesFromEqs [eq]) >= 1
+getClassFromEq eq = show cls `deepseq` not (null cls)
+  where cls = classesFromEqs [eq]
 
 classesHaveTerms eqs = found `all` terms
   where terms            = concatMap termsOf eqs
@@ -476,11 +478,11 @@ canMakeVars = do
   v <- genNormalisedVar
   return True
 
-{-# ANN canMakeQSSigs ("HLint: ignore Use null" :: String) #-}
 canMakeQSSigs = do
   v <- genNormalisedVar
   let sig = renderQSVars [v]
-  return (length (show sig) > 0)
+      str = show sig
+  str `deepseq` return True
 
 lookupVars = once $ do
   eqs <- resize 42 genEqsWithVars
@@ -493,21 +495,21 @@ lookupVars = once $ do
       foundName  = Test.QuickSpec.Term.name symbol
   return (expectName == foundName)
 
-{-# ANN justPrune ("HLint: ignore Length always non-negative" :: String) #-}
 justPrune = once $ do
     eqs <- resize 20 arbitrary
     let (_, eqs') = replaceTypes eqs
         o = pruneEqsN eqs'
-    return (length o >= 0)
+    show o `deepseq` return True
 
 newReduce = once (forAllShrink (resize 20 arbitrary)
                                shrink
                                newReduce')
-{-# ANN newReduce' ("HLint: ignore Use null" :: String) #-}
+
 newReduce' (Eqs eqs) = counterexample (show (("eqs",    eqs),
                                              ("result", result)))
-                                      (length (show result) > 0)
+                                      (str `deepseq` True)
   where result = reduction eqs
+        str    = show result
 
 reduceIdem = once (forAllShrink (resize 20 arbitrary)
                                 shrink
@@ -530,9 +532,8 @@ manualNatFindsEqs = once . monadicIO $ do
   -- Our golden input should match these
   assert (length eqs == length rawEqs)
 
-{-# ANN manualNatAllowsGiven ("HLint: ignore Use null" :: String) #-}
 manualNatAllowsGiven = counterexample (show eqs')
-                                      ((length eqs' >  0) &&
+                                      ((not (null eqs')) &&
                                        (length eqs' <= length parsedNatEqs))
   where clss   = classesFromEqs naturalEqs
         clss'  = sort (map (sort . mkUnSomeClassN natSig) clss)

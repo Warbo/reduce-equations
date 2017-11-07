@@ -1,0 +1,25 @@
+From: Chris Warburton
+Date: Tue, 07 Nov 2017 13:25:43 +0000
+State: new
+Subject: Normalise each equation
+Message-Id: <d030ecefe68b07dc-0-artemis@nixos>
+
+If our input contains 'un-normalised' equations, we'll currently output
+them un-normalised too. That's annoying.
+
+Things which make an equation un-normalised are:
+
+ - Variable indices should count up from 0, i.e. an equation like
+   'li7 ~= reverse (reverse li7)' should normalise to
+   'li0 ~= reverse (reverse li0)'
+ - Variable indices should be ascending, from left to right, i.e. an
+   equation like 'cons i1 (cons i0 li0) ~= swap (cons i0 (cons i1 li0))'
+   has 'i1' occurring to the left of 'i0', so it should normalise to
+                 'cons i0 (cons i1 li0) ~= swap (cons i1 (cons i0 li0))'
+ - The left/right sides of an equation should be in lexicographical
+   order, i.e. 'times 2 n0 ~= plus n0 n0' should normalise to
+   'plus n0 n0 ~= times 2 n0' since 'p' comes before 't'
+
+These are pretty trivial changes, but they let us compare equations more
+easily, since we no longer need to care about alpha-equivalence or
+symmetry.

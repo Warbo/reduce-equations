@@ -33,17 +33,17 @@ library
                      , Algebra.Equation.Internal.Types
   -- other-modules:       
   -- other-extensions:    
-  build-depends:       base >= 4.8 && < 4.10
-                     , aeson
+  build-depends:       aeson
+                     , base >= 4.8 && < 4.10
                      , bytestring
                      , containers
+                     , haskell-src-exts >= 1.18.2
+                     , mtl
                      , QuickCheck
                      , quickspec == 0.9.6
-                     , transformers
-                     , mtl
-                     , haskell-src-exts >= 1.18.2
                      , stringable
                      , text
+                     , transformers
   hs-source-dirs:      src
   default-language:    Haskell2010
 
@@ -51,9 +51,9 @@ executable reduce-equations
   main-is:             Main.hs
   -- other-modules:       
   -- other-extensions:    
-  build-depends:       base >= 4.8 && < 4.10
+  build-depends:       aeson
+                     , base >= 4.8 && < 4.10
                      , reduce-equations
-                     , aeson
   hs-source-dirs:      reduce-equations
   default-language:    Haskell2010
 
@@ -62,17 +62,18 @@ test-suite test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Main.hs
-  build-depends:       base >= 4.8 && < 4.10
-                     , reduce-equations
-                     , quickspec == 0.9.6
-                     , directory
-                     , aeson
+  build-depends:       aeson
+                     , base >= 4.8 && < 4.10
                      , bytestring
+                     , containers
+                     , deepseq
+                     , directory
                      , haskell-src-exts >= 1.18.2
                      , MissingH
-                     , stringable
-                     , containers
                      , QuickCheck == 2.8.2
-                     , text
+                     , quickspec == 0.9.6
+                     , reduce-equations
+                     , stringable
                      , tasty >= 0.11.2.1
                      , tasty-quickcheck
+                     , text
