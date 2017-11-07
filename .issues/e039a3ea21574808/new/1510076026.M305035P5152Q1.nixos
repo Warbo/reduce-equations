@@ -1,0 +1,10 @@
+From: Chris Warburton
+Date: Tue, 07 Nov 2017 17:32:55 +0000
+Subject: Re: Wrap results in array, if given array
+Message-Id: <e039a3ea21574808-e73db467cb61c9ca-artemis@nixos>
+References: <e039a3ea21574808-0-artemis@nixos>
+In-Reply-To: <e039a3ea21574808-0-artemis@nixos>
+
+We now (unconditionally) output an array of equations. This seems
+appropriate for now, since we (unconditionally) require an array of
+equations as input.

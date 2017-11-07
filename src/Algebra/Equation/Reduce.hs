@@ -14,9 +14,7 @@ import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Algebra.Equation.Internal.Eval
 import           Algebra.Equation.Internal.Types
 
-doReduce = parseAndReduce <$> BS.getContents >>= showEqs
-
-showEqs = mapM_ (BS.putStrLn . encode)
+doReduce = encode . parseAndReduce
 
 parseAndReduce s = case eitherDecode s of
   Left  err -> error ("Failed to parse eqs: " ++ err)

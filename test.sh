@@ -23,7 +23,7 @@ do
                cabal run -v0 reduce-equations < "$F")
     report "$?" "Reducing $F"
 
-    echo "$OUTPUT" | grep '^{'
+    echo "$OUTPUT" | jq -e 'type == "array" and (length | . > 0)' > /dev/null
     report "$?" "Got equations from $F"
 done
 

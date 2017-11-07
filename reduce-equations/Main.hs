@@ -1,6 +1,6 @@
 module Main where
 
-import Algebra.Equation.Reduce
-import System.Environment
+import qualified Algebra.Equation.Reduce    as Reduce
+import qualified Data.ByteString.Lazy.Char8 as BS
 
-main = doReduce
+main = BS.interact Reduce.doReduce

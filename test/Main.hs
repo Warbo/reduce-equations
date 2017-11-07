@@ -103,6 +103,7 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "Can prune converted equations"   convertPrunes
   , testProperty "Pruned eqs match"                parsedEqsPrune
   , testProperty "Fresh Nat reduces own eqs"       manualNatReducesSelf
+  , testProperty "Show makes array"                showMakesArray
   ]
 
 -- Tests
@@ -532,23 +533,16 @@ manualNatFindsEqs = once . monadicIO $ do
   -- Our golden input should match these
   assert (length eqs == length rawEqs)
 
-manualNatAllowsGiven = counterexample (show eqs')
-                                      ((not (null eqs')) &&
-                                       (length eqs' <= length parsedNatEqs))
-  where clss   = classesFromEqs naturalEqs
-        clss'  = sort (map (sort . mkUnSomeClassN natSig) clss)
-        eqs'   = unSomePruneN clss' natSig
-
-        naturalEqs = map (replaceEqTypes db) parsedNatEqs
-        db         = [(tyCon "Nat", tyCon "Natural")]
+manualNatAllowsGiven = counterexample (show eqs) check
+  where check = not (null eqs) && length eqs <= length parsedNatEqs
+        eqs   = unSomePruneN clss natSig
+        clss  = sort (map (sort . mkUnSomeClassN natSig) clss')
+        clss' = classesFromEqs naturalEqs
 
 manualNatClassesMatch = counterexample dbg result
-  where ourClss   = classesFromEqs eqs'
+  where ourClss   = classesFromEqs naturalEqs
         ourClss'  = sort (map (sort . mkUnSomeClassN natSig) ourClss)
         ourClss'' = map (map Test.QuickSpec.Term.term) ourClss'
-
-        eqs' = map (replaceEqTypes db) parsedNatEqs
-        db   = [(tyCon "Nat", tyCon "Natural")]
 
         result = setEq natNonTrivial ourClss''
 
@@ -557,7 +551,7 @@ manualNatClassesMatch = counterexample dbg result
         dbg    = show (("qs non-trivial", length natNonTrivial),
                        ("our classes",    length ourClss''))
 
-topNatTermsFound = all termInClasses (termsOf [] eqs')
+topNatTermsFound = all termInClasses (termsOf [] naturalEqs)
   where termsOf acc []          = acc
         termsOf acc (Eq l r:xs) = termsOf (l:r:acc) xs
         termInClasses t = let qs = any (renderTermN t natSig `elem`) natClasses
@@ -567,30 +561,24 @@ topNatTermsFound = all termInClasses (termsOf [] eqs')
                                 (False, _)     -> error $ show t ++ " not in QS"
                                 (_, False)     -> error $ show t ++ " not in ours"
                                 _              -> True
-        clss = classesFromEqs eqs'
-        eqs' = map (replaceEqTypes db) parsedNatEqs
-        db   = [(tyCon "Nat", tyCon "Natural")]
+        clss = classesFromEqs naturalEqs
 
 qsNatTermsFound = case unfoundInOurs of
     [] -> True
     us -> error (show ("unfound", us))
   where allTerms = concat (filter ((> 1) . length) natClasses)
 
-        clss = classesFromEqs eqs'
+        clss = classesFromEqs naturalEqs
 
         inOurs t = any (t `elem`) (map (map (`renderTermN` natSig)) clss)
 
         unfoundInOurs = filter (not . inOurs) allTerms
-
-        db   = [(tyCon "Nat", tyCon "Natural")]
-        eqs' = map (replaceEqTypes db) parsedNatEqs
 
 natClassesIncludeSingletons = any ((== 1) . length) natClasses
 
 convertPrunes = length (doPrune qsClasses natSig') == 10
   where qsClasses  = filter (Test.QuickSpec.Utils.Typed.several ((> 1) . length))
                             rawNatClasses'
-        db         = [(tyCon "Natural", tyCon "Z")]
 
 -- We don't compare equations directly, since they may differ slightly e.g. due
 -- to commutativity
@@ -608,6 +596,11 @@ manualNatReducesSelf = counterexample (show ("pruned", pruned))
                                       ((length pruned < 20) &&
                                        (length pruned > 1))
   where pruned = doPrune rawNatClasses natSig
+
+showMakesArray (Eqs eqs) = show (Eqs (go eqs)) `deepseq` True
+  where go eqs = case eitherDecode (doReduce (encode eqs)) of
+                   Left  err  -> error err
+                   Right eqs' -> eqs'
 
 -- Helpers
 
@@ -1028,6 +1021,9 @@ rawNatEqs = unsafePerformIO (LB.readFile "test/data/nat-simple-raw.json")
 Right parsedNatEqs = eitherDecode rawNatEqs :: Either String [Equation]
 
 (typeDb, parsedNatEqs') = replaceTypes parsedNatEqs
+
+naturalEqs = map (replaceEqTypes [(tyCon "Nat", tyCon "Natural")])
+                 parsedNatEqs
 
 doReps = map (Test.QuickSpec.Utils.Typed.some2
                (Test.QuickSpec.Utils.Typed.tagged term . head))

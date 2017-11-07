@@ -1,8 +1,9 @@
 From: Chris Warburton
 Date: Tue, 07 Nov 2017 13:23:14 +0000
-State: new
+State: resolved
 Subject: Wrap results in array, if given array
 Message-Id: <e039a3ea21574808-0-artemis@nixos>
+resolution: fixed
 
 If we're given a JSON array, we should output a JSON array.
 
