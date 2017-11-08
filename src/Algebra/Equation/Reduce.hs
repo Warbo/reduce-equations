@@ -71,11 +71,10 @@ restoreTypes db = map (replaceEqTypes db')
   where db'         = map swap db
         swap (x, y) = (y, x)
 
-normalise (Eq lhs rhs) = if orderedEq eq1
-                            then eq1
-                            else if orderedEq eq2
-                                    then eq2
-                                    else error ("No order for " ++ show eq1)
+normalise (Eq lhs rhs)
+    | orderedEq eq1 = eq1
+    | orderedEq eq2 = eq2
+    | otherwise     = error ("No order for " ++ show (Eq lhs rhs))
   where eq1 = renumber (Eq lhs rhs)
         eq2 = renumber (Eq rhs lhs)
 
@@ -87,7 +86,7 @@ renumber (Eq lhs rhs) = Eq lhs' rhs'
 
         -- Recurse to find all vars of all types, replace their indices using
         -- lookup table m, which maps a type and index to a new index
-        setAll :: (Map.Map Type (Map.Map Int Int)) -> Term -> [Type] -> Term
+        setAll :: Map.Map Type (Map.Map Int Int) -> Term -> [Type] -> Term
         setAll m x []     = x
         setAll m x (t:ts) = setAll m (setFor m t x) ts
         setFor m t (V (Var t' i a)) = if t == t'

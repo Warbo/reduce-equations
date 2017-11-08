@@ -77,9 +77,9 @@ termLessThanEq (V v1)        (V v2)        = v1 <= v2
 termLessThanEq (C c1)        (C c2)        = c1 <= c2
 termLessThanEq (App f1 x1 _) (App f2 x2 _) = f1 < f2 || ((f1 == f2) && x1 <= x2)
 termLessThanEq x             y             = num x <= num y
-  where num (C   _)     = 0
-        num (V   _)     = 1
-        num (App _ _ _) = 2
+  where num (C   _) = 0
+        num (V   _) = 1
+        num  App{}  = 2
 
 instance Show Term where
   show (C c)       = "C (" ++ show c ++ ")"
