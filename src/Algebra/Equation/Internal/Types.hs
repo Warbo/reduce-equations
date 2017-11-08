@@ -49,7 +49,7 @@ instance Eq Term where
   (App l1 r1 _) == (App l2 r2 _) = l1 == l2 && r1 == r2
   _             == _             = False
 
--- Duplicates the sorting ofTest.QuickSpec.Term.Term, but without the type
+-- Duplicates the sorting of Test.QuickSpec.Term.Term, but without the type
 -- juggling of "Some" and friends
 instance Ord Term where
   compare = comparing stamp
@@ -71,6 +71,15 @@ instance Ord Term where
 
           depth (App f x _) = depth f `max` (1 + depth x)
           depth _           = 1
+
+-- A more sane ordering
+termLessThanEq (V v1)        (V v2)        = v1 <= v2
+termLessThanEq (C c1)        (C c2)        = c1 <= c2
+termLessThanEq (App f1 x1 _) (App f2 x2 _) = f1 < f2 || ((f1 == f2) && x1 <= x2)
+termLessThanEq x             y             = num x <= num y
+  where num (C   _)     = 0
+        num (V   _)     = 1
+        num (App _ _ _) = 2
 
 instance Show Term where
   show (C c)       = "C (" ++ show c ++ ")"
@@ -100,7 +109,7 @@ instance Eq Sig where
                                    all (`elem` vs1) vs2 &&
                                    all (`elem` vs2) vs1
 
-data Var = Var Type Int Arity deriving (Show, Eq, Ord)
+data Var = Var Type Int Arity deriving (Show, Eq)
 
 instance ToJSON Var where
   toJSON (Var t i a) = object ["role"  .= ("variable" :: String),
@@ -115,12 +124,15 @@ instance FromJSON Var where
     return (Var (unwrapParens t) i (Arity (countArity t)))
   parseJSON _          = mzero
 
+instance Ord Var where
+  compare = comparing varName
+
 countArity (HSE.Syntax.TyFun _ i o) = 1 + countArity o
 countArity _                        = 0
 
 doCount haystack needle = T.count (T.pack needle) (T.pack haystack)
 
-data Const = Const Arity Name Type deriving (Show, Eq, Ord)
+data Const = Const Arity Name Type deriving (Show, Eq)
 
 instance ToJSON Const where
   toJSON (Const a n t) = object ["role"   .= ("constant" :: String),
@@ -134,6 +146,9 @@ instance FromJSON Const where
     s <- v .: "symbol"
     return (Const (Arity (countArity t)) s (unwrapParens t))
   parseJSON _          = mzero
+
+instance Ord Const where
+  compare = comparing constName
 
 type Type = HSE.Syntax.Type ()
 
@@ -238,7 +253,8 @@ typeName = fixUp . HSE.Pretty.prettyPrint
 
 varArity (Var t i a) = a
 
-varType (Var t i a) = t
+varIndex (Var t i a) = i
+varType  (Var t i a) = t
 
 constName :: Const -> Name
 constName (Const a n t) = n
