@@ -477,10 +477,10 @@ eqsSymmetric eqs = do
 eqsSetEq eqs = setEq eqs (map swap eqs)
   where swap (Eq l r) = Eq r l
 
-eqSidesAreSorted eq = termLessThanEq lhs rhs
+eqSidesAreSorted (CEq eq) = termLessThanEq lhs rhs
   where [Eq lhs rhs] = reduction [eq]
 
-varsAscend eq = all (isAsc . nub . map varIndex . varsOf) types
+varsAscend (CEq eq) = all (isAsc . nub . map varIndex . varsOf) types
   where types    = nub (map varType vars)
         vars     = eqVars (head (reduction [eq]))
         isAsc vs = vs == take (length vs) [0..]
@@ -885,6 +885,15 @@ consistentNames nts = all hasOneType names
         hasOneType n = length (typesOf n) == 1
         typesOf    n = nub (map snd (entriesOf n))
         entriesOf  n = filter ((== n) . fst) nts
+
+newtype ConsistentEquation = CEq Equation deriving (Show, Eq)
+
+instance Arbitrary ConsistentEquation where
+  arbitrary = do Eqs eqs <- arbitrary
+                 case eqs of
+                      []    -> scale (+1) arbitrary
+                      (x:_) -> return (CEq x)
+  shrink (CEq x) = concatMap (\(Eqs eqs) -> map CEq eqs) (shrink (Eqs [x]))
 
 instance Arbitrary Term where
   arbitrary = do
