@@ -1,8 +1,9 @@
 From: Chris Warburton
 Date: Tue, 07 Nov 2017 13:25:43 +0000
-State: new
+State: resolved
 Subject: Normalise each equation
 Message-Id: <d030ecefe68b07dc-0-artemis@nixos>
+resolution: fixed
 
 If our input contains 'un-normalised' equations, we'll currently output
 them un-normalised too. That's annoying.

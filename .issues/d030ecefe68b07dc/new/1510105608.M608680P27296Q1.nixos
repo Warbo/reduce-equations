@@ -1,0 +1,9 @@
+From: Chris Warburton
+Date: Wed, 08 Nov 2017 01:46:16 +0000
+Subject: Re: Normalise each equation
+Message-Id: <d030ecefe68b07dc-c67fca671762eab9-artemis@nixos>
+References: <d030ecefe68b07dc-0-artemis@nixos>
+In-Reply-To: <d030ecefe68b07dc-0-artemis@nixos>
+
+We now number variables sequentially and ensure the LHS is
+lexicographically smaller than the RHS

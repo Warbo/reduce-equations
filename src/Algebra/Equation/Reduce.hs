@@ -23,7 +23,7 @@ parseAndReduce s = case eitherDecode s of
 
 reduction :: [Equation] -> [Equation]
 reduction eqs = if consistent eqs'
-                    then result
+                    then map normalise result
                     else error "Inconsistent types in parsed equations"
   where eqs'        = setAllTypes eqs
         (db, eqs'') = replaceTypes eqs'
@@ -70,3 +70,49 @@ restoreTypes :: [(Type, Type)] -> [Equation] -> [Equation]
 restoreTypes db = map (replaceEqTypes db')
   where db'         = map swap db
         swap (x, y) = (y, x)
+
+normalise (Eq lhs rhs) = if orderedEq eq1
+                            then eq1
+                            else if orderedEq eq2
+                                    then eq2
+                                    else error ("No order for " ++ show eq1)
+  where eq1 = renumber (Eq lhs rhs)
+        eq2 = renumber (Eq rhs lhs)
+
+orderedEq (Eq lhs rhs) = termLessThanEq lhs rhs
+
+renumber (Eq lhs rhs) = Eq lhs' rhs'
+  where lhs' = setAll final (setAll bump lhs types) types
+        rhs' = setAll final (setAll bump rhs types) types
+
+        -- Recurse to find all vars of all types, replace their indices using
+        -- lookup table m, which maps a type and index to a new index
+        setAll :: (Map.Map Type (Map.Map Int Int)) -> Term -> [Type] -> Term
+        setAll m x []     = x
+        setAll m x (t:ts) = setAll m (setFor m t x) ts
+        setFor m t (V (Var t' i a)) = if t == t'
+                                         then V (Var t' (m Map.! t Map.! i) a)
+                                         else V (Var t' i                   a)
+        setFor m t (C c)            = C c
+        setFor m t (App f x y)      = App (setFor m t f) (setFor m t x) y
+
+        vars     = eqVars (Eq lhs rhs)
+        types    = nub (map varType vars)
+        maxVar   = maximum (map varIndex vars)
+        varsOf t = filter ((t ==) . varType) vars
+
+        -- Increase each var index to be outside the range of the final indices.
+        -- We do this to prevent clashes, e.g. replacing x with y and y with z.
+        doBump n = n + maxVar + 1
+        bump = Map.fromList
+                 (map (\t -> (t, Map.fromList
+                                   (map ((\i -> (i, doBump i)) . varIndex)
+                                        (varsOf t))))
+                      types)
+
+        -- Make each type's variables sequential
+        final = Map.fromList
+                  (map (\t -> (t, Map.fromList (zip (map (doBump . varIndex)
+                                                         (varsOf t))
+                                                    [0..])))
+                       types)

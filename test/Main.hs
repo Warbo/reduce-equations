@@ -87,6 +87,8 @@ main = defaultMain $ testGroup "All tests" [
   , testProperty "QuickSpec conversions invert"    convertTypesIso
   , testProperty "Symmetric equations equal"       eqsSymmetric
   , testProperty "Spot symmetric equations"        eqsSetEq
+  , testProperty "Equation sides are sorted"       eqSidesAreSorted
+  , testProperty "Variables in ascending order"    varsAscend
   , testProperty "Can generate eq variables"       canMakeVars
   , testProperty "Can generate var QS sigs"        canMakeQSSigs
   , testProperty "Can find vars in sig"            lookupVars
@@ -474,6 +476,15 @@ eqsSymmetric eqs = do
 
 eqsSetEq eqs = setEq eqs (map swap eqs)
   where swap (Eq l r) = Eq r l
+
+eqSidesAreSorted eq = termLessThanEq lhs rhs
+  where [Eq lhs rhs] = reduction [eq]
+
+varsAscend eq = all (isAsc . nub . map varIndex . varsOf) types
+  where types    = nub (map varType vars)
+        vars     = eqVars (head (reduction [eq]))
+        isAsc vs = vs == take (length vs) [0..]
+        varsOf t = filter ((t ==) . varType) vars
 
 canMakeVars = do
   v <- genNormalisedVar
