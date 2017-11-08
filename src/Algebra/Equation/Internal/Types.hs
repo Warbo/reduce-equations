@@ -252,7 +252,6 @@ typeName = fixUp . HSE.Pretty.prettyPrint
         collapseSpace          "" = ""
 
 varArity (Var t i a) = a
-
 varIndex (Var t i a) = i
 varType  (Var t i a) = t
 

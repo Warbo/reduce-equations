@@ -515,7 +515,10 @@ newReduce' (Eqs eqs) = counterexample (show (("eqs",    eqs),
 reduceIdem = once (forAllShrink (resize 20 arbitrary)
                                 shrink
                                 reduceIdem')
-reduceIdem' (Eqs eqs) = setEq eqs' eqs''
+reduceIdem' (Eqs eqs) = counterexample (show (("eqs",   eqs),
+                                              ("eqs'",  eqs'),
+                                              ("eqs''", eqs'')))
+                                       (setEq eqs' eqs'')
   where eqs'  = reduction eqs
         eqs'' = reduction eqs'
 

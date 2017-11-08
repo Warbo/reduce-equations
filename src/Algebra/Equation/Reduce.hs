@@ -3,13 +3,14 @@
 module Algebra.Equation.Reduce where
 
 import           Data.Aeson
-import qualified Data.ByteString.Lazy.Char8 as BS
-import qualified Data.ByteString.Internal   as BI
+import qualified Data.ByteString.Lazy.Char8   as BS
+import qualified Data.ByteString.Internal     as BI
 import           Data.List
+import qualified Data.Map                     as Map
 import           Data.Maybe
-import qualified Data.Stringable         as S
-import qualified Data.Text.Lazy          as T
-import qualified Data.Text.Lazy.Encoding as TE
+import qualified Data.Stringable              as S
+import qualified Data.Text.Lazy               as T
+import qualified Data.Text.Lazy.Encoding      as TE
 import qualified Language.Haskell.Exts.Syntax as HSE.Syntax
 import           Algebra.Equation.Internal.Eval
 import           Algebra.Equation.Internal.Types
