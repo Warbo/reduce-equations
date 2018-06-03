@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
-{-# LANGUAGE LambdaCase #-}
 
 module Algebra.Equation.Internal.Types where
 
@@ -164,7 +163,7 @@ instance FromJSON Type where
 stripLoc :: HSE.Syntax.Type a -> Type
 stripLoc = void
 
-data Name = Name String deriving (Show, Eq, Ord)
+newtype Name = Name String deriving (Show, Eq, Ord)
 
 instance ToJSON Name where
   toJSON (Name n) = toJSON n
@@ -173,7 +172,7 @@ instance FromJSON Name where
   parseJSON (String s) = return (Name (toString s))
   parseJSON _          = mzero
 
-data Arity = Arity Int deriving (Show, Eq)
+newtype Arity = Arity Int deriving (Show, Eq)
 
 instance ToJSON Arity where
   toJSON (Arity a) = toJSON a

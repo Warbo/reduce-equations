@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, ExistentialQuantification, PartialTypeSignatures #-}
+{-# LANGUAGE RankNTypes, ExistentialQuantification, PartialTypeSignatures #-}
 module Algebra.Equation.Internal (
     module Algebra.Equation.Internal.Eval
   , module Algebra.Equation.Internal.Types
