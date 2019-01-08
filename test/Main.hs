@@ -625,7 +625,7 @@ natSig = mconcat [
   Test.QuickSpec.Signature.fun2 "times" ((*)  :: Natural -> Natural -> Natural),
   Test.QuickSpec.Signature.gvars (map (\n -> "(var, Natural, " ++ show n ++ ")")
                                       [0, 1, 2])
-    (((fromInteger . abs) <$> arbitrary) :: Gen Natural)]
+    ((fromInteger . abs <$> arbitrary) :: Gen Natural)]
 
 natSig' = mconcat [
   Test.QuickSpec.Signature.fun0 "cZ"    (undefined :: Z),
@@ -692,9 +692,7 @@ exampleJson = unsafePerformIO $ exampleFiles >>= mapM LB.readFile
 
 exampleDir = "test/data"
 
-exampleFiles = do
-    fs <- getDirectoryContents exampleDir
-    return (prefix (json fs))
+exampleFiles = prefix . json <$> getDirectoryContents exampleDir
   where prefix   = map ((exampleDir ++ "/") ++)
         json     = filter isJson
         isJson :: String -> Bool
