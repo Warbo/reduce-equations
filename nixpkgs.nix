@@ -21,6 +21,8 @@ with rec {
     with nixpkgs [];
     haskell.packages.ghc7103.override (old: {
       overrides = self: super: {
+        QuickCheck       = self.callHackage "QuickCheck" "2.8.2" {};
+
         reduce-equations = self.callPackage (super.haskellSrc2nix {
           inherit src;
           name = "reduce-equations";
